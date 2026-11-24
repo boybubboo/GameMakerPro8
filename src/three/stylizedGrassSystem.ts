@@ -65,8 +65,8 @@ export function createDefaultGrassConfig(): GrassFieldConfig {
     primaryColor: '#54B049',
     secondaryColor: '#98D954',
     mixNoiseScale: 1.0,
-    carexMix: 0.32,
-    tuftClumpiness: 0.45,
+    carexMix: 0.34,
+    tuftClumpiness: 0.56,
   };
 }
 
@@ -473,8 +473,27 @@ function populateTerrainAndColorTextures(
       texData[o + 2] = nx * 0.5 + 0.5;
       texData[o + 3] = nz * 0.5 + 0.5;
 
-      // Subtle warm/dry patch noise baked into the ground color map so fields vary naturally
-      const patchDry = 0.5 + 0.5 * Math.sin(wx * 0.085 + Math.cos(wz * 0.072) * 1.7);
+      // Subtle warm/dry organic 2D noise baked into the ground color map (no axial sine stripes)
+      const gHash = (gx: number, gz: number) => {
+        const px = (gx + 17.31) * 127.1;
+        const py = (gz + 43.87) * 311.7;
+        const s = Math.sin(px + py) * 43758.5453123;
+        return s - Math.floor(s);
+      };
+      const gValNoise = (nx: number, nz: number) => {
+        const ix = Math.floor(nx);
+        const iz = Math.floor(nz);
+        const fx = nx - ix;
+        const fz = nz - iz;
+        const ux = fx * fx * (3 - 2 * fx);
+        const uz = fz * fz * (3 - 2 * fz);
+        const a = gHash(ix, iz);
+        const b = gHash(ix + 1, iz);
+        const c = gHash(ix, iz + 1);
+        const d = gHash(ix + 1, iz + 1);
+        return (a + (b - a) * ux) * (1 - uz) + (c + (d - c) * ux) * uz;
+      };
+      const patchDry = gValNoise(wx * 0.045, wz * 0.045) * 0.65 + gValNoise(wx * 0.11 + 5.7, wz * 0.11 - 3.2) * 0.35;
       const rFin = THREE.MathUtils.clamp(colR * invW + patchDry * 0.06, 0, 1);
       const gFin = THREE.MathUtils.clamp(colG * invW + (1 - patchDry) * 0.04, 0, 1);
       const bFin = THREE.MathUtils.clamp(colB * invW, 0, 1);
@@ -555,13 +574,13 @@ interface GrassMaterialBundle {
 }
 
 const gHash21Tsl = Fn(([pIn]: [any]) => {
-  const p = vec2(fract(vec2(pIn).mul(vec2(127.1, 311.7)))).toVar();
+  const p = vec2(fract(vec2(pIn).add(vec2(17.31, 43.87)).mul(vec2(127.1, 311.7)))).toVar();
   p.addAssign(dot(p, p.add(34.345)));
   return fract(p.x.mul(p.y));
 });
 
 const gHash22Tsl = Fn(([p]: [any]) => {
-  const pv = vec2(p);
+  const pv = vec2(p).add(vec2(31.73, 19.41));
   const p3 = vec3(fract(vec3(pv.x, pv.y, pv.x).mul(vec3(0.1031, 0.103, 0.0973)))).toVar();
   p3.addAssign(dot(p3, vec3(p3.y, p3.z, p3.x).add(33.33)));
   return fract(vec2(p3.x.add(p3.y), p3.y.add(p3.z)).mul(vec2(p3.z, p3.y)));
@@ -688,13 +707,56 @@ function createGrassNodeMaterial(opts: {
     const baseCell = floor(chunkOriginXZ.div(uCellSpacing).add(0.5)).add(aCellOffset);
     const hashSeed = baseCell.add(vec2(aBladeSub.mul(37.13), aBladeSub.mul(91.7)));
     const jitter = gHash22Tsl(hashSeed).sub(0.5);
-    const rawWorldXZ = baseCell.add(0.5).add(jitter.mul(0.92)).mul(uCellSpacing);
-    // Organic tuft cluster cell (~1.6m patches) — pulls blades toward clump centers as tuftClumpiness rises
-    const clumpGridScale = float(0.62);
-    const clumpCell = floor(rawWorldXZ.mul(clumpGridScale));
-    const clumpHash = gHash22Tsl(clumpCell);
-    const clumpCenterXZ = clumpCell.add(0.22).add(clumpHash.mul(0.56)).div(clumpGridScale);
-    const clumpPull = clamp(uTuftClumpiness, 0.0, 1.0).mul(0.58);
+    // Wide cross-cell jitter lets blades mingle across grid lines so no square lattice ever forms
+    const rawWorldXZ = baseCell.add(0.5).add(jitter.mul(1.52)).mul(uCellSpacing);
+
+    // Domain-warped 2x2 Voronoi clump field (irregular organic tufts, no square clump grid)
+    const warpX = gNoise2DTsl(rawWorldXZ.mul(0.28).add(vec2(5.2, 1.3))).sub(0.5);
+    const warpZ = gNoise2DTsl(rawWorldXZ.mul(0.28).add(vec2(18.7, 9.4))).sub(0.5);
+    const warpedXZ = rawWorldXZ.add(vec2(warpX, warpZ).mul(1.35));
+    const clumpGridScale = float(0.58);
+    const warpedScaled = warpedXZ.mul(clumpGridScale);
+    const baseClump = floor(warpedScaled.sub(0.5));
+
+    const evalSite = (ox: number, oz: number) => {
+      const c = baseClump.add(vec2(ox, oz));
+      const h = gHash22Tsl(c);
+      const w = gHash21Tsl(c.add(vec2(7.7, 23.1)));
+      const siteScaled = c.add(0.14).add(h.mul(0.72));
+      const diffScaled = siteScaled.sub(warpedScaled);
+      const d2 = dot(diffScaled, diffScaled).mul(mix(0.68, 1.42, w));
+      return { diffScaled, h, w, d2 };
+    };
+
+    const s00 = evalSite(0, 0);
+    const s10 = evalSite(1, 0);
+    const s01 = evalSite(0, 1);
+    const s11 = evalSite(1, 1);
+
+    const pickA = s00.d2.lessThanEqual(s10.d2);
+    const aDiff = select(pickA, s00.diffScaled, s10.diffScaled);
+    const aHash = select(pickA, s00.h, s10.h);
+    const aW = select(pickA, s00.w, s10.w);
+    const aD2 = min(s00.d2, s10.d2);
+
+    const pickB = s01.d2.lessThanEqual(s11.d2);
+    const bDiff = select(pickB, s01.diffScaled, s11.diffScaled);
+    const bHash = select(pickB, s01.h, s11.h);
+    const bW = select(pickB, s01.w, s11.w);
+    const bD2 = min(s01.d2, s11.d2);
+
+    const pickBest = aD2.lessThanEqual(bD2);
+    const clumpDiffXZ = select(pickBest, aDiff, bDiff).div(clumpGridScale);
+    const clumpHash = select(pickBest, aHash, bHash);
+    const clumpWeight = select(pickBest, aW, bW);
+
+    const clumpCenterXZ = rawWorldXZ.add(clumpDiffXZ);
+    const clumpDist = length(clumpDiffXZ);
+    const bladePullRnd = gHash21Tsl(hashSeed.add(vec2(29.4, 51.8)));
+    const clumpPull = clamp(uTuftClumpiness, 0.0, 1.0)
+      .mul(0.66)
+      .mul(mix(0.62, 1.0, clumpWeight))
+      .mul(mix(0.45, 1.0, bladePullRnd));
     const worldXZ = mix(rawWorldXZ, clumpCenterXZ, clumpPull);
 
     const clipPos = vec4(2.0, 2.0, 2.0, 1.0).toVar();
@@ -726,9 +788,25 @@ function createGrassNodeMaterial(opts: {
       const terrainY = float(tData.r);
       const grassMask = float(tData.g);
       const densityRnd = float(gHash21Tsl(hashSeed.add(vec2(17.3, 5.9))));
+      // Organic meadow density drift + tuft gap thinning so solid preset fields never blanket evenly
+      const meadowDrift = gNoise2DTsl(worldXZ.mul(0.15).add(vec2(3.1, 8.7)))
+        .mul(0.62)
+        .add(gNoise2DTsl(worldXZ.mul(0.42).add(vec2(19.4, 2.3))).mul(0.38));
+      const clumpAffinity = float(1.0).sub(smoothstep(0.22, 1.12, clumpDist));
+      const baseNaturalDensity = mix(0.76, 1.0, smoothstep(0.16, 0.78, meadowDrift));
+      const clumpGapMod = mix(
+        0.42,
+        1.0,
+        clamp(clumpAffinity.mul(0.72).add(meadowDrift.mul(0.28)), 0.0, 1.0)
+      );
+      const organicDensity = mix(
+        baseNaturalDensity,
+        clumpGapMod,
+        clamp(uTuftClumpiness, 0.0, 1.0).mul(0.68)
+      );
       const maskKeep = grassMask
         .greaterThanEqual(0.08)
-        .and(densityRnd.lessThanEqual(smoothstep(0.06, 0.72, grassMask)));
+        .and(densityRnd.lessThanEqual(smoothstep(0.06, 0.72, grassMask).mul(organicDensity)));
 
       If(maskKeep, () => {
         const rootClip = cameraProjectionMatrix
@@ -950,11 +1028,10 @@ function createGrassNodeMaterial(opts: {
   })();
 
   mat.colorNode = Fn(() => {
-    const dapple1 = sin(vWorldPos.x.mul(0.075).add(sin(vWorldPos.z.mul(0.055)).mul(1.4))).mul(
-      cos(vWorldPos.z.mul(0.068).add(0.6))
-    );
-    const dapple2 = sin(vWorldPos.x.mul(0.14).sub(vWorldPos.z.mul(0.11)).add(1.8)).mul(0.5);
-    const meadowVar = float(0.93).add(dapple1.add(dapple2).mul(0.065));
+    const worldXZFrag = vec2(vWorldPos.x, vWorldPos.z);
+    const dapple1 = gNoise2DTsl(worldXZFrag.mul(0.048).add(vec2(2.7, 9.1))).sub(0.5);
+    const dapple2 = gNoise2DTsl(worldXZFrag.mul(0.13).add(vec2(14.3, 6.4))).sub(0.5);
+    const meadowVar = float(0.95).add(dapple1.mul(0.12)).add(dapple2.mul(0.07));
 
     // Dual-tone noise-driven blend between primary and secondary grass palette colors
     const patchNoise = gNoise2DTsl(vec2(vWorldPos.x, vWorldPos.z).mul(float(0.045).mul(uMixNoiseScale)));

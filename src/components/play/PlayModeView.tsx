@@ -79,6 +79,8 @@ import type {
   InventoryItemDef,
   InventoryStack,
   MisfitAbilityId,
+  ObjectInteractionAttributeId,
+  ObjectInteractionCalibration,
   ObjectMechanism,
   PropPresetId,
   RoguelikeRelicDef,
@@ -491,6 +493,12 @@ interface RuntimeEntity {
   torchFlames?: Array<{ mesh: THREE.Object3D; baseY: number; phase: number }>;
   skitEmote?: SkitBeatEmote | null;
   skitMoving?: boolean;
+  interactionAttributes?: ObjectInteractionAttributeId[];
+  interactionCalibrations?: Partial<
+    Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+  >;
+  entityYaw?: number;
+  entityScale?: number;
 }
 
 export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
@@ -535,6 +543,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     label: string;
     isOpen: boolean;
     locked: boolean;
+  } | null>(null);
+  const [sitPrompt, setSitPrompt] = useState<{
+    label: string;
+    isSitting: boolean;
+  } | null>(null);
+  const [climbPrompt, setClimbPrompt] = useState<{
+    label: string;
+    active: boolean;
   } | null>(null);
   const [fishingBanner, setFishingBanner] = useState<'none' | 'waiting' | 'bite'>('none');
   const [inventoryStacks, setInventoryStacks] = useState<InventoryStack[]>([
@@ -1292,6 +1308,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     health: isRoguelike ? roguelikeConfig.startingMaxHealth : 6,
     maxHealth: isRoguelike ? roguelikeConfig.startingMaxHealth : 6,
     stamina: 100,
+    energy: 100,
     magic: 100,
     coins: 0,
     keys: 0,
@@ -1312,6 +1329,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     jumpQueued: false,
     attackQueued: false,
     interactQueued: false,
+    interactPointerDown: false,
     magicQueued: false,
     healQueued: false,
     misfitPowerQueued: false,
@@ -1685,6 +1703,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
     const onWindowBlur = () => {
       inputRef.current.keys.clear();
+      inputRef.current.interactPointerDown = false;
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -2663,6 +2682,12 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           torchFlames: torchFlames.length > 0 ? torchFlames : undefined,
           skitEmote: null,
           skitMoving: false,
+          interactionAttributes:
+            ent.interactionAttributes ?? customMeta?.interactionAttributes,
+          interactionCalibrations:
+            ent.interactionCalibrations ?? customMeta?.interactionCalibrations,
+          entityYaw: (ent.rotation * Math.PI) / 180,
+          entityScale: Math.max(0.25, ent.scale || 1),
         };
       });
 
@@ -3036,6 +3061,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let stamina = 100;
       let staminaExhausted = false;
       let lastStaminaToast = -10;
+      let energy = 100;
+      let lastEnergyToast = -10;
       let magic = 100;
       let coins = carryStats?.coins ?? resumeSaved?.coins ?? (isRoguelikeLevel ? runInit.coinsEarned : 0);
       let keys = carryStats?.keys ?? resumeSaved?.keys ?? 0;
@@ -3454,8 +3481,64 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let lastPubSpeed: number | undefined = undefined;
       let lastHarvestPromptKey = '';
       let lastDoorPromptKey = '';
+      let lastSitPromptKey = '';
+      let lastClimbPromptKey = '';
       let lastNearCraftingBench = false;
       let armorBlockCounter = 0;
+
+      let isSitting = false;
+      let sitTargetX = 0;
+      let sitTargetY = 0;
+      let sitTargetZ = 0;
+      let sitFacingYaw = 0;
+      let isClimbing = false;
+      let climbKind: 'entity' | 'tree' | 'mountain' = 'entity';
+      let climbAnchorX = 0;
+      let climbAnchorZ = 0;
+      let climbMaxY = 12;
+      let climbPhase = 0;
+      let prevHeroFloorY = heroY;
+      let isClimbingStairs = false;
+      let hasNearbyInteractablePrev = false;
+      const choppedStumps: {
+        id: string;
+        x: number;
+        y: number;
+        z: number;
+        size: number;
+        label: string;
+      }[] = [];
+
+      const getEntityAttrs = (rt: RuntimeEntity): ObjectInteractionAttributeId[] => {
+        if (rt.interactionAttributes && rt.interactionAttributes.length > 0) {
+          return rt.interactionAttributes;
+        }
+        const out: ObjectInteractionAttributeId[] = [];
+        const lower = rt.name.toLowerCase();
+        if (
+          rt.propPreset !== 'craftingBench' &&
+          (lower.includes('chair') ||
+            lower.includes('bench') ||
+            lower.includes('stool') ||
+            lower.includes('stump') ||
+            lower.includes('fallen log') ||
+            lower.includes('seat') ||
+            lower.includes('sofa') ||
+            lower.includes('couch'))
+        ) {
+          out.push('sit');
+        }
+        if (lower.includes('ladder')) {
+          out.push('climbVertical');
+        }
+        if (
+          rt.buildingBlock?.shape === 'stairsStraight' ||
+          rt.buildingBlock?.shape === 'stairsSpiral'
+        ) {
+          out.push('climbStairs');
+        }
+        return out;
+      };
 
       function tick() {
         if (disposed) return;
@@ -3918,7 +4001,27 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const joyMag = Math.hypot(inp.joyX, inp.joyY);
           const isFirstPersonControl = camModeNow === 'firstPerson';
           const effectiveMoveMag = isFirstPersonControl ? Math.abs(moveZ) : mag;
-          const wantsRun = joyMag > 0.85 && enabledSet.has('run');
+
+          if (isSitting) {
+            if (inp.jumpQueued || inp.attackQueued || effectiveMoveMag > 0.22) {
+              isSitting = false;
+              heroY = Math.max(heroY, sampleLevelHeight(activeLevel, heroX, heroZ));
+            }
+          }
+
+          const useHeld =
+            inp.keys.has('KeyE') ||
+            inp.keys.has('AltLeft') ||
+            inp.keys.has('AltRight') ||
+            inp.interactPointerDown;
+          const energySpeedMult = energy <= 0 ? 0.78 : 1;
+          const wantsRun =
+            (joyMag > 0.85 ||
+              (useHeld && !hasNearbyInteractablePrev && effectiveMoveMag > 0.08)) &&
+            enabledSet.has('run') &&
+            !isSitting &&
+            !isClimbing &&
+            energy > 0.5;
           isRunning = wantsRun && !staminaExhausted && stamina > 0.5 && effectiveMoveMag > 0.08;
           const moveSpeed =
             (isSwimming
@@ -3927,8 +4030,215 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 : 3.9
               : isRunning
               ? 7.4
-              : 3.6) * heroSpeedMult;
+              : 3.6) *
+            heroSpeedMult *
+            energySpeedMult;
 
+          // Detect climbable surfaces (tagged entities, live trees, steep openWorld mountain cliffs)
+          let climbCandidate: {
+            kind: 'entity' | 'tree' | 'mountain';
+            label: string;
+            anchorX: number;
+            anchorZ: number;
+            maxY: number;
+            dist: number;
+          } | null = null;
+          if (!isSitting && !isSwimming && canWalk) {
+            for (const rt of runtimeEntities) {
+              if (!rt.alive) continue;
+              if (!getEntityAttrs(rt).includes('climbVertical')) continue;
+              const d = Math.hypot(rt.x - heroX, rt.z - heroZ);
+              const baseY = sampleLevelHeight(activeLevel, rt.x, rt.z) + (rt.elevationY ?? 0);
+              const maxY = baseY + Math.max(2.6, (rt.entityScale ?? 1) * 2.8);
+              if (d <= 1.45 && heroY >= baseY - 0.5 && heroY <= maxY + 0.35) {
+                if (!climbCandidate || d < climbCandidate.dist) {
+                  climbCandidate = {
+                    kind: 'entity',
+                    label: rt.name,
+                    anchorX: rt.x,
+                    anchorZ: rt.z,
+                    maxY,
+                    dist: d,
+                  };
+                }
+              }
+            }
+            if (!climbCandidate) {
+              for (const tr of islandHandles.choppableTrees) {
+                if (tr.chopped) continue;
+                const d = Math.hypot(tr.x - heroX, tr.z - heroZ);
+                const trunkReach = Math.max(0.85, tr.size * 0.48) + 0.72;
+                const crownY = tr.y + Math.max(2.6, tr.size * 2.8);
+                if (d <= trunkReach && heroY >= tr.y - 0.4 && heroY <= crownY + 0.25) {
+                  climbCandidate = {
+                    kind: 'tree',
+                    label: 'Tree Trunk',
+                    anchorX: tr.x,
+                    anchorZ: tr.z,
+                    maxY: crownY,
+                    dist: d,
+                  };
+                  break;
+                }
+              }
+            }
+            if (!climbCandidate && env === 'openWorld') {
+              const fwdX = Math.sin(heroYaw);
+              const fwdZ = Math.cos(heroYaw);
+              const curH = sampleLevelHeight(activeLevel, heroX, heroZ);
+              const aheadH = sampleLevelHeight(activeLevel, heroX + fwdX * 0.9, heroZ + fwdZ * 0.9);
+              const slope = (aheadH - curH) / 0.9;
+              if (slope > 0.78 && Math.max(aheadH, curH) >= 2.6) {
+                climbCandidate = {
+                  kind: 'mountain',
+                  label: 'Rockface',
+                  anchorX: heroX + fwdX * 0.9,
+                  anchorZ: heroZ + fwdZ * 0.9,
+                  maxY: aheadH + 1.4,
+                  dist: 0.75,
+                };
+              }
+            }
+          }
+
+          const climbPromptKey = isClimbing
+            ? `active:${climbKind}`
+            : climbCandidate
+            ? `near:${climbCandidate.label}`
+            : '';
+          if (climbPromptKey !== lastClimbPromptKey) {
+            lastClimbPromptKey = climbPromptKey;
+            if (isClimbing) {
+              setClimbPrompt({
+                label:
+                  climbKind === 'tree'
+                    ? 'Tree'
+                    : climbKind === 'mountain'
+                    ? 'Rockface'
+                    : climbCandidate?.label || 'Climbable',
+                active: true,
+              });
+            } else if (climbCandidate) {
+              setClimbPrompt({ label: climbCandidate.label, active: false });
+            } else {
+              setClimbPrompt(null);
+            }
+          }
+
+          const climbingForward = -moveZ > 0.22;
+          if (!isClimbing && !isSitting && !isSwimming && canWalk && climbCandidate) {
+            const dxC = climbCandidate.anchorX - heroX;
+            const dzC = climbCandidate.anchorZ - heroZ;
+            const lenC = Math.max(0.01, Math.hypot(dxC, dzC));
+            const facingDot = (dxC / lenC) * Math.sin(heroYaw) + (dzC / lenC) * Math.cos(heroYaw);
+            if ((climbingForward && facingDot > 0.35) || (heroVelY > 1.2 && facingDot > 0.2)) {
+              isClimbing = true;
+              climbKind = climbCandidate.kind;
+              climbAnchorX = climbCandidate.anchorX;
+              climbAnchorZ = climbCandidate.anchorZ;
+              climbMaxY = climbCandidate.maxY;
+              heroVelY = 0;
+              airborneTimer = 0;
+              jumpsUsed = 0;
+            }
+          }
+
+          const waterSurfaceY = IslandTerrain.waterLevel;
+          let waterDepth = env === 'openWorld' ? waterSurfaceY - floorY : 0;
+          if (isSitting) {
+            heroX = sitTargetX;
+            heroY = sitTargetY;
+            heroZ = sitTargetZ;
+            heroYaw = sitFacingYaw;
+            heroVelY = 0;
+            airborneTimer = 0;
+            jumpsUsed = 0;
+            isSwimming = false;
+            isClimbingStairs = false;
+            floorY = sampleLevelHeight(activeLevel, heroX, heroZ);
+            energy = Math.min(100, energy + dt * 16);
+            stamina = Math.min(100, stamina + dt * 32 * staminaRegenMult);
+          } else if (isClimbing) {
+            floorY = sampleLevelHeight(activeLevel, heroX, heroZ);
+            const vertInput = THREE.MathUtils.clamp(-moveZ, -1, 1);
+            const sideInput = THREE.MathUtils.clamp(moveX, -1, 1);
+            const climbSpeed = 3.4 * energySpeedMult;
+
+            if (climbKind === 'tree' || climbKind === 'entity') {
+              heroYaw = Math.atan2(climbAnchorX - heroX, climbAnchorZ - heroZ);
+            }
+            if (Math.abs(vertInput) > 0.1) {
+              heroY += vertInput * climbSpeed * dt;
+              climbPhase += Math.abs(vertInput) * dt * 8.5;
+            }
+            if (Math.abs(sideInput) > 0.1) {
+              const tanX = Math.cos(heroYaw);
+              const tanZ = -Math.sin(heroYaw);
+              const [sx, sz] = resolveHorizontalCollision(
+                activeLevel,
+                heroX + tanX * sideInput * 1.45 * dt,
+                heroZ + tanZ * sideInput * 1.45 * dt,
+                0.55,
+                false,
+                collisionCtx
+              );
+              heroX = sx;
+              heroZ = sz;
+              climbPhase += Math.abs(sideInput) * dt * 5.0;
+            }
+
+            heroVelY = 0;
+            airborneTimer = 0;
+            jumpsUsed = 0;
+            isSwimming = false;
+            isClimbingStairs = false;
+            stamina = Math.max(0, stamina - (Math.abs(vertInput) > 0.1 ? 6 : 1.5) * dt);
+            energy = Math.max(0, energy - 2.4 * dt);
+
+            if (inp.jumpQueued) {
+              inp.jumpQueued = false;
+              isClimbing = false;
+              heroVelY = 7.8;
+              heroKnockVX -= Math.sin(heroYaw) * 2.8;
+              heroKnockVZ -= Math.cos(heroYaw) * 2.8;
+              AudioEngine.playSound(activeLevel.audio.jump);
+            } else if (vertInput < -0.1 && heroY <= floorY + 0.1) {
+              isClimbing = false;
+              heroY = floorY;
+            } else if (
+              climbKind === 'mountain' &&
+              env === 'openWorld' &&
+              vertInput > 0.1 &&
+              heroY > floorY + 0.35 &&
+              sampleLevelHeight(
+                activeLevel,
+                heroX + Math.sin(heroYaw) * 0.85,
+                heroZ + Math.cos(heroYaw) * 0.85
+              ) <=
+                heroY + 0.28
+            ) {
+              // Cresting mountain top: step cleanly onto ledge
+              heroX += Math.sin(heroYaw) * 0.72;
+              heroZ += Math.cos(heroYaw) * 0.72;
+              heroY = sampleLevelHeight(activeLevel, heroX, heroZ);
+              isClimbing = false;
+            } else if (vertInput > 0.1 && heroY >= climbMaxY) {
+              heroX += Math.sin(heroYaw) * 0.55;
+              heroZ += Math.cos(heroYaw) * 0.55;
+              isClimbing = false;
+              heroVelY = 2.4;
+            } else if (climbKind === 'mountain') {
+              const aheadSlopeH = sampleLevelHeight(
+                activeLevel,
+                heroX + Math.sin(heroYaw) * 0.9,
+                heroZ + Math.cos(heroYaw) * 0.9
+              );
+              const curSlopeH = sampleLevelHeight(activeLevel, heroX, heroZ);
+              if ((aheadSlopeH - curSlopeH) / 0.9 < 0.35 && heroY <= curSlopeH + 0.35) {
+                isClimbing = false;
+              }
+            }
+          } else {
           if (isFirstPersonControl && canWalk) {
             collisionCtx.actorY = heroY;
             // In Character POV: A/D & Left/Right rotate the character left/right (even when standing still);
@@ -4096,6 +4406,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
           // Ground, modular building surfaces & platforms
           floorY = sampleLevelHeight(activeLevel, heroX, heroZ);
+          let nearStairSurface = false;
           for (const entData of activeLevel.entities) {
             if (entData.buildingBlock) {
               const [bx, bz] = levelBoardToWorld(activeLevel, entData.position);
@@ -4112,8 +4423,24 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               );
               if (surfY !== null) {
                 floorY = Math.max(floorY, surfY);
+                if (
+                  entData.buildingBlock.shape === 'stairsStraight' ||
+                  entData.buildingBlock.shape === 'stairsSpiral' ||
+                  entData.interactionAttributes?.includes('climbStairs')
+                ) {
+                  nearStairSurface = true;
+                }
               }
               continue;
+            }
+            if (
+              entData.interactionAttributes?.includes('climbStairs') &&
+              Math.hypot(
+                levelBoardToWorld(activeLevel, entData.position)[0] - heroX,
+                levelBoardToWorld(activeLevel, entData.position)[1] - heroZ
+              ) < 3.4
+            ) {
+              nearStairSurface = true;
             }
             if (entData.kind !== 'platform') continue;
             const rt = runtimeEntities.find((r) => r.id === entData.id);
@@ -4139,9 +4466,15 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             }
           }
 
+          isClimbingStairs =
+            nearStairSurface &&
+            effectiveMoveMag > 0.08 &&
+            !isSwimming &&
+            Math.abs(floorY - prevHeroFloorY) > 0.008;
+          prevHeroFloorY = floorY;
+
           // Water detection & Auto-Swim state transitions (wide hysteresis prevents shore chatter)
-          const waterSurfaceY = IslandTerrain.waterLevel;
-          const waterDepth = env === 'openWorld' ? waterSurfaceY - floorY : 0;
+          waterDepth = env === 'openWorld' ? waterSurfaceY - floorY : 0;
           if (canSwim) {
             if (!isSwimming) {
               if (
@@ -4209,7 +4542,27 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             }
           }
 
-          const moving = (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) && canWalk;
+          const movingNow =
+            (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) && canWalk;
+          const energyDrainRate = isSwimming
+            ? 1.6
+            : isRunning
+            ? 2.2
+            : movingNow
+            ? 1.15
+            : 0.45;
+          energy = Math.max(0, energy - energyDrainRate * dt);
+          if (energy <= 0 && movingNow && gameElapsed - lastEnergyToast > 4.5) {
+            lastEnergyToast = gameElapsed;
+            showToast('Low Energy! Find a rock, log, stump, or chair and press Use to sit.');
+          }
+          } // end !isSitting && !isClimbing
+
+          const moving =
+            !isSitting &&
+            !isClimbing &&
+            (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) &&
+            canWalk;
           const actualHorizSpeed =
             simDt > 0.0001 ? Math.hypot(heroX - prevHeroX, heroZ - prevHeroZ) / simDt : 0;
           const heroTotalScale = Math.max(0.45, activeProject.heroModelScale ?? 1);
@@ -4226,6 +4579,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             walkPhase += dt * (isRunning ? 8.8 : 5.4) * locoVelocityRatio;
           }
 
+          if (!isSitting && !isClimbing) {
           if (isSwimming) {
             const waveBob = Math.sin(bobPhase) * 0.032;
             const targetFloatY = Math.max(
@@ -4264,8 +4618,10 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroVelY = 0;
             showToast('Fell off the cliff!');
           }
+          }
 
           // Water ripple ring when wading or swimming in openWorld water
+          waterDepth = env === 'openWorld' ? waterSurfaceY - floorY : 0;
           const inAnyWater = env === 'openWorld' && waterDepth > 0.14 && heroY <= waterSurfaceY + 0.15;
           if (inAnyWater) {
             waterRipple.visible = true;
@@ -4325,11 +4681,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           if (heroCustom) {
             const isTrulyAirborne =
               !isSwimming &&
+              !isSitting &&
+              !isClimbing &&
               (jumpsUsed > 0 || (airborneTimer > 0.1 && heroY > floorY + 0.45));
-            if (attackAnimTimer > 0) heroCustom.setAction('attack', 0.08);
+            if (isSitting) heroCustom.setAction('sit', 0.12);
+            else if (isClimbing) heroCustom.setAction('climbVertical', 0.12);
+            else if (attackAnimTimer > 0)
+              heroCustom.setAction(activeAttackKind === 'axe' ? 'swing' : 'attack', 0.08);
             else if (inp.emoteTimer > 0) heroCustom.setAction('interact', 0.12);
             else if (isSwimming) heroCustom.setAction('swim', 0.14);
             else if (isTrulyAirborne) heroCustom.setAction('jump', 0.1);
+            else if (isClimbingStairs) heroCustom.setAction('climbStairs', 0.14);
             else if (moving && isRunning) heroCustom.setAction('run', 0.16);
             else if (moving) heroCustom.setAction('walk', 0.16);
             else heroCustom.setAction('idle', 0.18);
@@ -4342,17 +4704,28 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
             const isLocomotingOnGround =
               moving && !isSwimming && !isTrulyAirborne && attackAnimTimer <= 0 && inp.emoteTimer <= 0;
+            const climbActiveMove =
+              isClimbing && (Math.abs(moveZ) > 0.12 || Math.abs(moveX) > 0.12);
             const spd =
               (activeProject.heroAnimSpeed ?? 1) *
-              (isSwimming && !moving ? 0.65 : isLocomotingOnGround ? locoVelocityRatio : 1);
+              (isClimbing
+                ? climbActiveMove
+                  ? 1.0
+                  : 0.05
+                : isSwimming && !moving
+                ? 0.65
+                : isLocomotingOnGround
+                ? locoVelocityRatio
+                : 1);
             heroCustom.update(simDt, spd);
           } else if (heroRig) {
-            heroRig.shadowDisc.visible = !isSwimming;
+            heroRig.shadowDisc.visible = !isSwimming && !isClimbing;
             const heldTool = heldDefNow?.toolKind ?? null;
 
             const dampJoint = (cur: number, target: number, lambda = 12) =>
               THREE.MathUtils.damp(cur, target, lambda, dt);
 
+            let targetBodyY = 0;
             let targetBodyYaw = 0;
             let targetBodyRoll = 0;
             let targetHeadX = isSwimming ? -swimTiltX * 0.7 : 0;
@@ -4367,7 +4740,24 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             let targetLegLX = 0;
             let targetLegRX = 0;
 
-            if (isSwimming) {
+            if (isSitting) {
+              targetBodyY = -0.32;
+              targetLegLX = -1.42;
+              targetLegRX = -1.42;
+              targetArmLX = -0.24;
+              targetArmRX = -0.24;
+              targetForearmLX = -0.36;
+              targetForearmRX = -0.36;
+            } else if (isClimbing) {
+              const reach = Math.sin(climbPhase);
+              targetArmLX = -2.05 + reach * 0.52;
+              targetArmRX = -2.05 - reach * 0.52;
+              targetForearmLX = -0.35;
+              targetForearmRX = -0.35;
+              targetLegLX = -0.58 - reach * 0.44;
+              targetLegRX = -0.58 + reach * 0.44;
+              targetHeadX = -0.24;
+            } else if (isSwimming) {
               if (attackAnimTimer > 0) {
                 const p = 1 - attackAnimTimer / activeAttackDuration;
                 if (p < 0.28) {
@@ -4407,7 +4797,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 targetLegRX = -tread * 0.2;
               }
             } else {
-              const stride = moving ? Math.sin(walkPhase) * 0.62 : 0;
+              const strideMult = isClimbingStairs ? 1.35 : 1;
+              const stride = moving ? Math.sin(walkPhase) * 0.62 * strideMult : 0;
+              if (isClimbingStairs) {
+                targetBodyY = Math.abs(Math.sin(walkPhase)) * 0.06;
+              }
               targetLegLX = stride;
               targetLegRX = -stride;
               targetArmLX = -stride * 0.68;
@@ -4564,7 +4958,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               }
             }
 
-            heroRig.bodyPivot.rotation.x = swimTiltX;
+            heroRig.bodyPivot.position.y = dampJoint(heroRig.bodyPivot.position.y, targetBodyY, 14);
+            heroRig.bodyPivot.rotation.x = isSitting ? -0.05 : isClimbing ? -0.1 : swimTiltX;
             heroRig.bodyPivot.rotation.y = dampJoint(heroRig.bodyPivot.rotation.y, targetBodyYaw, 18);
             heroRig.bodyPivot.rotation.z = dampJoint(heroRig.bodyPivot.rotation.z, targetBodyRoll, 10);
             heroRig.head.rotation.x = dampJoint(heroRig.head.rotation.x, targetHeadX, 10);
@@ -4703,6 +5098,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               } else {
                 const isAxe = heldDefNow?.toolKind === 'axe';
                 stamina = Math.max(0, stamina - (isAxe ? 16 : 20));
+                energy = Math.max(0, energy - 1.8);
                 if (stamina <= 0) {
                   staminaExhausted = true;
                 }
@@ -4799,6 +5195,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   }
                   stump.position.set(bestTree.x, bestTree.y, bestTree.z);
                   scene.add(stump);
+                  choppedStumps.push({
+                    id: bestTree.id,
+                    x: bestTree.x,
+                    y: bestTree.y,
+                    z: bestTree.z,
+                    size: bestTree.size,
+                    label: 'Tree Stump',
+                  });
 
                   const fallTree = buildFallingTreeMesh(bestTree.kind, bestTree.size, bestTree.colorHex);
                   if (style !== 'painterlyPBR') {
@@ -5720,6 +6124,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const baddiesRemaining = runtimeEntities.some((r) => r.kind === 'baddie' && r.alive);
           let nearestDoorPrompt: { label: string; isOpen: boolean; locked: boolean } | null = null;
           let nearestDoorPromptDist = 999;
+          let nearInteractableEntity = false;
 
           for (const rt of runtimeEntities) {
             if (!rt.alive) continue;
@@ -5777,6 +6182,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   if (rule.event === 'levelStarts') {
                     if (!mechLevelStartsFired) eventMatched = true;
                   } else if (rule.event === 'playerUses') {
+                    if (dist <= rule.radius) {
+                      nearInteractableEntity = true;
+                    }
                     if (didInteract && dist <= rule.radius) {
                       eventMatched = true;
                       interactConsumed = true;
@@ -6388,6 +6796,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               );
               const autoDist = rt.chatStyle.autoShowDistance;
 
+              if (dist < 2.8) {
+                nearInteractableEntity = true;
+              }
               if (didInteract && dist < 2.8) {
                 interactConsumed = true;
                 if (rt.pickupable && rt.pickupItemId && !rt.giftGiven) {
@@ -7245,6 +7656,147 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             AudioEngine.playSound('chime');
           }
 
+          // Sitting detection & toggle on rocks, chopped stumps, fallen logs, chairs & 'sit'-tagged objects
+          let nearestSitTarget: {
+            label: string;
+            x: number;
+            y: number;
+            z: number;
+            dist: number;
+            seatHeight: number;
+            seatForward: number;
+            entityYaw: number;
+            cal?: ObjectInteractionCalibration;
+          } | null = null;
+          if (!isDriving && !isSwimming && !isSitting) {
+            for (const rt of runtimeEntities) {
+              if (!rt.alive) continue;
+              if (!getEntityAttrs(rt).includes('sit')) continue;
+              const d = Math.hypot(rt.x - heroX, rt.z - heroZ);
+              const baseY = sampleLevelHeight(activeLevel, rt.x, rt.z) + (rt.elevationY ?? 0);
+              if (d <= 2.15 && Math.abs(heroY - baseY) < 2.2) {
+                if (!nearestSitTarget || d < nearestSitTarget.dist) {
+                  nearestSitTarget = {
+                    label: rt.name,
+                    x: rt.x,
+                    y: baseY,
+                    z: rt.z,
+                    dist: d,
+                    seatHeight: 0.44 * (rt.entityScale ?? 1),
+                    seatForward: 0.24 * (rt.entityScale ?? 1),
+                    entityYaw: rt.entityYaw ?? 0,
+                    cal: rt.interactionCalibrations?.sit,
+                  };
+                }
+              }
+            }
+            for (const st of choppedStumps) {
+              const d = Math.hypot(st.x - heroX, st.z - heroZ);
+              if (d <= 2.05 && Math.abs(heroY - st.y) < 2.0) {
+                if (!nearestSitTarget || d < nearestSitTarget.dist) {
+                  nearestSitTarget = {
+                    label: st.label,
+                    x: st.x,
+                    y: st.y,
+                    z: st.z,
+                    dist: d,
+                    seatHeight: Math.max(0.32, st.size * 0.42),
+                    seatForward: 0.2,
+                    entityYaw: 0,
+                  };
+                }
+              }
+            }
+            for (let hi = 0; hi < islandHandles.harvestableScatter.length; hi++) {
+              const hs = islandHandles.harvestableScatter[hi];
+              if (hs.collected || hs.scatterKind !== 'rock' || hs.size < 0.68) continue;
+              const d = Math.hypot(hs.x - heroX, hs.z - heroZ);
+              if (d <= 2.15 && Math.abs(heroY - hs.y) < 2.2) {
+                if (!nearestSitTarget || d < nearestSitTarget.dist) {
+                  nearestSitTarget = {
+                    label: 'Big Rock',
+                    x: hs.x,
+                    y: hs.y,
+                    z: hs.z,
+                    dist: d,
+                    seatHeight: Math.max(0.35, hs.size * 0.44),
+                    seatForward: 0.26,
+                    entityYaw: 0,
+                  };
+                }
+              }
+            }
+          }
+
+          if (isSitting && didInteract && !interactConsumed) {
+            interactConsumed = true;
+            isSitting = false;
+            heroY = Math.max(heroY, sampleLevelHeight(activeLevel, heroX, heroZ));
+          } else if (!isSitting && nearestSitTarget && didInteract && !interactConsumed) {
+            interactConsumed = true;
+            if (nearestSitTarget.cal) {
+              const c = nearestSitTarget.cal;
+              const cosE = Math.cos(nearestSitTarget.entityYaw);
+              const sinE = Math.sin(nearestSitTarget.entityYaw);
+              sitTargetX =
+                nearestSitTarget.x + c.offset[0] * cosE + c.offset[2] * sinE;
+              sitTargetY = nearestSitTarget.y + c.offset[1];
+              sitTargetZ =
+                nearestSitTarget.z - c.offset[0] * sinE + c.offset[2] * cosE;
+              sitFacingYaw =
+                nearestSitTarget.entityYaw + THREE.MathUtils.degToRad(c.yawDeg);
+            } else {
+              const dxS = heroX - nearestSitTarget.x;
+              const dzS = heroZ - nearestSitTarget.z;
+              const outwardYaw =
+                Math.hypot(dxS, dzS) > 0.08
+                  ? Math.atan2(dxS, dzS)
+                  : heroYaw + Math.PI;
+              sitTargetX =
+                nearestSitTarget.x + Math.sin(outwardYaw) * nearestSitTarget.seatForward;
+              sitTargetY = nearestSitTarget.y + nearestSitTarget.seatHeight;
+              sitTargetZ =
+                nearestSitTarget.z + Math.cos(outwardYaw) * nearestSitTarget.seatForward;
+              sitFacingYaw = outwardYaw;
+            }
+            isSitting = true;
+            isClimbing = false;
+            heroVelY = 0;
+            heroX = sitTargetX;
+            heroY = sitTargetY;
+            heroZ = sitTargetZ;
+            heroYaw = sitFacingYaw;
+            showToast(
+              `Sitting on ${nearestSitTarget.label} — resting to recover Energy!`
+            );
+          }
+
+          const sitPromptKey = isSitting
+            ? 'sitting'
+            : nearestSitTarget
+            ? `sit:${nearestSitTarget.label}`
+            : '';
+          if (sitPromptKey !== lastSitPromptKey) {
+            lastSitPromptKey = sitPromptKey;
+            if (isSitting) {
+              setSitPrompt({ label: 'Seat', isSitting: true });
+            } else if (nearestSitTarget) {
+              setSitPrompt({ label: nearestSitTarget.label, isSitting: false });
+            } else {
+              setSitPrompt(null);
+            }
+          }
+
+          hasNearbyInteractablePrev = Boolean(
+            isSitting ||
+              nearestSitTarget ||
+              isNearBenchNow ||
+              nearestDoorPrompt ||
+              nearestScatter ||
+              nearInteractableEntity ||
+              fishingState.phase !== 'idle'
+          );
+
           // Buddies Tavern Feast & Celebration Trigger
           if (isBuddies && buddyEntities.length > 0 && !tavernCelebrated) {
             const tavernDist = tavernRt
@@ -7515,15 +8067,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
             const heroPt = levelWorldToBoard(activeLevel, heroX, heroZ);
             const stamRound = Math.round(stamina);
+            const energyRound = Math.round(energy);
             const magicRound = Math.round(magic);
             const flashHp = hitInvuln > 0.7;
-            const hudKey = `${health}/${maxHealth}|${stamRound}|${magicRound}|${coins}|${keys}|${timeText}|${Math.round(heroPt.x * 400)},${Math.round(heroPt.y * 400)}|${cachedBaddieKey}|${flashHp ? 1 : 0}|${boss?.health ?? ''}|${recruitedBuddyIds.length}|${bagCount}|${cachedHotbarKey}`;
+            const hudKey = `${health}/${maxHealth}|${stamRound}|${energyRound}|${magicRound}|${coins}|${keys}|${timeText}|${Math.round(heroPt.x * 400)},${Math.round(heroPt.y * 400)}|${cachedBaddieKey}|${flashHp ? 1 : 0}|${boss?.health ?? ''}|${recruitedBuddyIds.length}|${bagCount}|${cachedHotbarKey}`;
             if (hudKey !== cachedHudKey) {
               cachedHudKey = hudKey;
               setHudState({
                 health,
                 maxHealth,
                 stamina: stamRound,
+                energy: energyRound,
                 magic: magicRound,
                 coins,
                 keys,
@@ -8177,6 +8731,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       islandAbort = null;
       setHarvestPrompt(null);
       setDoorInteractPrompt(null);
+      setSitPrompt(null);
+      setClimbPrompt(null);
       liveQualityTargetRef.current = null;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
@@ -8406,10 +8962,21 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       inputRef.current.attackQueued = true;
     } else if (action === 'interact') {
       inputRef.current.interactQueued = true;
+      inputRef.current.interactPointerDown = true;
     } else if (action === 'magicBolt') {
       inputRef.current.magicQueued = true;
     } else if (action === 'heal') {
       inputRef.current.healQueued = true;
+    }
+  };
+
+  const handleActionPointerUp = (
+    action: ActionButtonBinding,
+    e: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    e.stopPropagation();
+    if (action === 'interact') {
+      inputRef.current.interactPointerDown = false;
     }
   };
 
@@ -8469,6 +9036,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   stickOffset={stickOffset}
                   onStickPointerDown={handleStickPointer}
                   onActionPointerDown={handleActionPointerDown}
+                  onActionPointerUp={handleActionPointerUp}
                   onOpenInventory={() => {
                     setInventoryMode('bag');
                     setInventoryOpen(true);
@@ -9028,6 +9596,49 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               Walk over {harvestPrompt.label} to collect <span className="text-[#4ADE80]">{harvestPrompt.itemName}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* Sit / Stand Prompt */}
+      {controlsActive && sitPrompt && !nearCraftingBench && !doorInteractPrompt && !harvestPrompt && (
+        <div
+          className={`fixed ${
+            unlockedPowers.length > 0 ? 'bottom-32' : 'bottom-24'
+          } left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#11141D]/92 border border-[#FACC15]/50 text-white text-xs font-extrabold shadow-xl z-30 flex items-center gap-2 whitespace-nowrap`}
+        >
+          <span>
+            {sitPrompt.isSitting ? (
+              <>
+                Resting · Press <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">E / Alt</span> or move to stand up
+              </>
+            ) : (
+              <>
+                Press <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">E / Alt</span> to sit on{' '}
+                <span className="text-[#FACC15]">{sitPrompt.label}</span>
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* Climb Prompt */}
+      {controlsActive && climbPrompt && !sitPrompt && !nearCraftingBench && !doorInteractPrompt && !harvestPrompt && (
+        <div
+          className={`fixed ${
+            unlockedPowers.length > 0 ? 'bottom-32' : 'bottom-24'
+          } left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#11141D]/92 border border-[#38BDF8]/50 text-white text-xs font-extrabold shadow-xl z-30 flex items-center gap-2 whitespace-nowrap`}
+        >
+          <span>
+            {climbPrompt.active ? (
+              <>
+                Climbing <span className="text-[#38BDF8]">{climbPrompt.label}</span> · W/S Up &amp; Down · Shift/Space Jump off
+              </>
+            ) : (
+              <>
+                Walk forward into <span className="text-[#38BDF8]">{climbPrompt.label}</span> to climb
+              </>
+            )}
+          </span>
         </div>
       )}
 

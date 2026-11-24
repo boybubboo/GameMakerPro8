@@ -8,7 +8,60 @@ export type EnvironmentType = 'openWorld' | 'dungeon' | 'castle' | 'sideScroller
 
 export type AssetCategory = 'character' | 'prop' | 'scenery' | 'plant' | 'tree' | 'building';
 
-export type CustomClipSlot = 'idle' | 'walk' | 'run' | 'jump' | 'swim' | 'attack' | 'interact';
+export type ObjectInteractionAttributeId =
+  | 'sit'
+  | 'hold'
+  | 'swing'
+  | 'throw'
+  | 'sleep'
+  | 'jump'
+  | 'fishing'
+  | 'lift'
+  | 'pull'
+  | 'push'
+  | 'dig'
+  | 'climbVertical'
+  | 'climbStairs'
+  | 'crouch'
+  | 'sneak'
+  | 'stab'
+  | 'bowPull';
+
+export type CharacterInteractionMotionId = 'hug' | 'punch' | 'push' | 'kick';
+
+export interface ObjectInteractionCalibration {
+  offset: [number, number, number];
+  yawDeg: number;
+  presetId?: string;
+}
+
+export type CustomClipSlot =
+  | 'idle'
+  | 'walk'
+  | 'run'
+  | 'jump'
+  | 'swim'
+  | 'attack'
+  | 'interact'
+  | 'sit'
+  | 'hold'
+  | 'swing'
+  | 'throw'
+  | 'sleep'
+  | 'fishing'
+  | 'lift'
+  | 'pull'
+  | 'push'
+  | 'dig'
+  | 'climbVertical'
+  | 'climbStairs'
+  | 'crouch'
+  | 'sneak'
+  | 'stab'
+  | 'bowPull'
+  | 'hug'
+  | 'punch'
+  | 'kick';
 
 export type RigBoneRole =
   | 'hips'
@@ -193,6 +246,8 @@ export interface CustomAssetMeta {
   customAnimations?: CustomMotionPreset[];
   savedPoses?: SavedPosePreset[];
   mechanisms?: ObjectMechanism[];
+  interactionAttributes?: ObjectInteractionAttributeId[];
+  interactionCalibrations?: Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>;
   objectRecipe?: ObjectMakerDoc;
   characterRecipe?: CharacterMakerDoc;
   treeRecipe?: StylizedCanopyConfig;
@@ -332,6 +387,7 @@ export interface ObjectSurfaceFinish {
   emissiveIntensity?: number;
   weathering?: WeatheringPreset;
   weatheringIntensity?: number;
+  proceduralSurface?: 'logBark' | 'logRings';
 }
 
 export interface ObjectGeometryModifiers {
@@ -393,6 +449,8 @@ export interface ObjectMakerDoc {
   groups: ObjectGroupSpec[];
   curveGuide?: CurveGuideConfig;
   vertexPaintStrokes?: VertexPaintStroke[];
+  interactionAttributes?: ObjectInteractionAttributeId[];
+  interactionCalibrations?: Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>;
 }
 
 export interface ExportedAssetBundle {
@@ -1302,6 +1360,8 @@ export interface LevelEntity {
   customAnimSpeed?: number;
   mechTemplate?: BuiltinMechanismTemplate;
   mechanisms?: ObjectMechanism[];
+  interactionAttributes?: ObjectInteractionAttributeId[];
+  interactionCalibrations?: Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>;
   // Particle & FX Emitter configuration
   fxEmitter?: FxEmitterConfig;
   // Stylized procedural / GLB treetop canopy tree configuration
@@ -1745,6 +1805,7 @@ export interface HUDState {
   health: number;
   maxHealth: number;
   stamina: number;
+  energy: number;
   magic: number;
   coins: number;
   keys: number;

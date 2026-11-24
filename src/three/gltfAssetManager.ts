@@ -10,6 +10,8 @@ import type {
   CustomClipSlot,
   CustomMotionPreset,
   CustomRigSettings,
+  ObjectInteractionAttributeId,
+  ObjectInteractionCalibration,
   ObjectMakerDoc,
   ObjectMechanism,
   StylizedCanopyConfig,
@@ -99,8 +101,27 @@ export function autoMapAnimationClips(
   map.run = match([/run/i, /sprint/i, /dash/i, /gallop/i]);
   map.jump = match([/jump/i, /hop/i, /leap/i, /air/i]);
   map.swim = match([/swim/i, /tread/i, /paddle/i, /float/i]);
-  map.attack = match([/attack/i, /slash/i, /swing/i, /punch/i, /hit/i, /kick/i, /strike/i]);
+  map.attack = match([/attack/i, /slash/i, /swing/i, /hit/i, /strike/i]);
   map.interact = match([/interact/i, /wave/i, /dance/i, /cheer/i, /talk/i, /open/i, /emote/i]);
+  map.sit = match([/\bsit\b/i, /seat/i, /chair/i]);
+  map.hold = match([/\bhold\b/i, /carry/i]);
+  map.swing = match([/swing/i, /chop/i]);
+  map.throw = match([/throw/i, /toss/i]);
+  map.sleep = match([/sleep/i, /lie/i, /rest/i]);
+  map.fishing = match([/fish/i, /cast/i, /reel/i]);
+  map.lift = match([/\blift\b/i, /hoist/i]);
+  map.pull = match([/\bpull\b/i, /tug/i]);
+  map.push = match([/\bpush\b/i, /shove/i]);
+  map.dig = match([/\bdig\b/i, /shovel/i]);
+  map.climbVertical = match([/climb.*vert/i, /ladder/i, /\bclimb\b/i]);
+  map.climbStairs = match([/stair/i, /step.*up/i]);
+  map.crouch = match([/crouch/i, /duck/i]);
+  map.sneak = match([/sneak/i, /creep/i, /stealth/i]);
+  map.stab = match([/stab/i, /thrust/i]);
+  map.bowPull = match([/bow/i, /arrow/i, /draw/i]);
+  map.hug = match([/\bhug\b/i, /embrace/i]);
+  map.punch = match([/punch/i, /jab/i]);
+  map.kick = match([/\bkick\b/i]);
 
   // Only default clipNames[0] to idle if it wasn't already matched to an active motion/action slot
   const alreadyAssigned = new Set(Object.values(map).filter(Boolean));
@@ -511,10 +532,15 @@ export function evictCachedAsset(assetId: string): void {
 
 export async function registerGeneratedGlbAsset(opts: {
   existingMeta?: CustomAssetMeta;
+  forcedId?: string;
   name: string;
   category: AssetCategory;
   buffer: ArrayBuffer;
   mechanisms?: ObjectMechanism[];
+  interactionAttributes?: ObjectInteractionAttributeId[];
+  interactionCalibrations?: Partial<
+    Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+  >;
   objectRecipe?: ObjectMakerDoc;
   characterRecipe?: CharacterMakerDoc;
   treeRecipe?: StylizedCanopyConfig;
@@ -526,7 +552,7 @@ export async function registerGeneratedGlbAsset(opts: {
   const gltf = await loader.parseAsync(opts.buffer, '');
   const cached = prepareGLTFScene(gltf, opts.category);
   const clipNames = cached.animations.map((c, idx) => c.name || `Clip ${idx + 1}`);
-  const id = opts.existingMeta?.id ?? uid();
+  const id = opts.forcedId ?? opts.existingMeta?.id ?? uid();
   parsedCache.set(id, cached);
 
   const cleanName = opts.name.trim() || 'Custom Object';
@@ -568,6 +594,14 @@ export async function registerGeneratedGlbAsset(opts: {
           }
         : cached.defaultRigSettings,
     mechanisms: opts.mechanisms && opts.mechanisms.length > 0 ? opts.mechanisms : undefined,
+    interactionAttributes:
+      opts.interactionAttributes !== undefined
+        ? opts.interactionAttributes
+        : opts.existingMeta?.interactionAttributes,
+    interactionCalibrations:
+      opts.interactionCalibrations !== undefined
+        ? opts.interactionCalibrations
+        : opts.existingMeta?.interactionCalibrations,
     objectRecipe: opts.objectRecipe,
     characterRecipe: opts.characterRecipe,
     treeRecipe: opts.treeRecipe,
@@ -735,13 +769,40 @@ export function instantiateCustomModel(
     });
 
     const effectiveClipMap = meta?.clipMap ?? autoMapAnimationClips(Array.from(clipByName.keys()));
-    const slots: CustomClipSlot[] = ['idle', 'walk', 'run', 'jump', 'swim', 'attack', 'interact'];
+    const slots: CustomClipSlot[] = [
+      'idle',
+      'walk',
+      'run',
+      'jump',
+      'swim',
+      'attack',
+      'interact',
+      'sit',
+      'hold',
+      'swing',
+      'throw',
+      'sleep',
+      'fishing',
+      'lift',
+      'pull',
+      'push',
+      'dig',
+      'climbVertical',
+      'climbStairs',
+      'crouch',
+      'sneak',
+      'stab',
+      'bowPull',
+      'hug',
+      'punch',
+      'kick',
+    ];
     for (const slot of slots) {
       const targetName = effectiveClipMap[slot];
       const entry = targetName ? clipByName.get(targetName) : undefined;
       if (entry) {
         const act = mixer.clipAction(entry.clip);
-        if (slot === 'jump' || slot === 'attack') {
+        if (slot === 'jump' || slot === 'attack' || slot === 'swing' || slot === 'throw' || slot === 'punch' || slot === 'kick' || slot === 'stab') {
           act.setLoop(THREE.LoopOnce, 1);
           act.clampWhenFinished = true;
         }

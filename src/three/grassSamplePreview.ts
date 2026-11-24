@@ -51,7 +51,7 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
   {
     id: 'lush_meadow',
     name: 'Lush Meadow',
-    summary: 'Balanced vibrant green tufts & soft Carex waves',
+    summary: 'Natural vibrant green drifts & soft Carex tufts',
     patch: {
       enabled: true,
       quality: 'lush',
@@ -62,14 +62,14 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
       primaryColor: '#54B049',
       secondaryColor: '#98D954',
       mixNoiseScale: 1.0,
-      carexMix: 0.32,
-      tuftClumpiness: 0.45,
+      carexMix: 0.34,
+      tuftClumpiness: 0.56,
     },
   },
   {
     id: 'wild_sedge',
     name: 'Wild Sedge Marsh',
-    summary: 'Dense tall arching Carex clumps with deep emerald roots',
+    summary: 'Dense tall arching Carex clusters with deep emerald roots',
     patch: {
       enabled: true,
       quality: 'dense',
@@ -80,14 +80,14 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
       primaryColor: '#3B7F46',
       secondaryColor: '#8FB84C',
       mixNoiseScale: 1.3,
-      carexMix: 0.78,
-      tuftClumpiness: 0.82,
+      carexMix: 0.76,
+      tuftClumpiness: 0.8,
     },
   },
   {
     id: 'manicured_lawn',
     name: 'Manicured Lawn',
-    summary: 'Uniform low-cut turf with minimal clumping',
+    summary: 'Trimmed garden turf with natural soft micro-tufts',
     patch: {
       enabled: true,
       quality: 'ultra',
@@ -97,15 +97,15 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
       tipGlow: 0.38,
       primaryColor: '#4BA447',
       secondaryColor: '#75C954',
-      mixNoiseScale: 0.8,
-      carexMix: 0.04,
-      tuftClumpiness: 0.08,
+      mixNoiseScale: 0.85,
+      carexMix: 0.12,
+      tuftClumpiness: 0.24,
     },
   },
   {
     id: 'golden_savanna',
     name: 'Golden Savanna',
-    summary: 'Spaced sun-warmed wheat clumps & sweeping wind',
+    summary: 'Organic sun-warmed wheat drifts & sweeping wind',
     patch: {
       enabled: true,
       quality: 'lush',
@@ -117,7 +117,7 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
       secondaryColor: '#D6BE56',
       mixNoiseScale: 1.2,
       carexMix: 0.65,
-      tuftClumpiness: 0.86,
+      tuftClumpiness: 0.84,
     },
   },
   {
@@ -135,7 +135,7 @@ export const GRASS_MEADOW_PRESETS: GrassMeadowPreset[] = [
       secondaryColor: '#69CF9E',
       mixNoiseScale: 1.5,
       carexMix: 0.42,
-      tuftClumpiness: 0.68,
+      tuftClumpiness: 0.7,
     },
   },
 ];
@@ -151,13 +151,13 @@ export interface GrassSampleStats {
 }
 
 const gHash21Sample = Fn(([pIn]: [any]) => {
-  const p = vec2(fract(vec2(pIn).mul(vec2(127.1, 311.7)))).toVar();
+  const p = vec2(fract(vec2(pIn).add(vec2(17.31, 43.87)).mul(vec2(127.1, 311.7)))).toVar();
   p.addAssign(dot(p, p.add(34.345)));
   return fract(p.x.mul(p.y));
 });
 
 const gHash22Sample = Fn(([p]: [any]) => {
-  const pv = vec2(p);
+  const pv = vec2(p).add(vec2(31.73, 19.41));
   const p3 = vec3(fract(vec3(pv.x, pv.y, pv.x).mul(vec3(0.1031, 0.103, 0.0973)))).toVar();
   p3.addAssign(dot(p3, vec3(p3.y, p3.z, p3.x).add(33.33)));
   return fract(vec2(p3.x.add(p3.y), p3.y.add(p3.z)).mul(vec2(p3.z, p3.y)));
@@ -179,8 +179,8 @@ function fractScalar(v: number): number {
 }
 
 function jsHash21(x: number, y: number): number {
-  let px = fractScalar(x * 127.1);
-  let py = fractScalar(y * 311.7);
+  let px = fractScalar((x + 17.31) * 127.1);
+  let py = fractScalar((y + 43.87) * 311.7);
   const d = px * (px + 34.345) + py * (py + 34.345);
   px += d;
   py += d;
@@ -188,14 +188,39 @@ function jsHash21(x: number, y: number): number {
 }
 
 function jsHash22(x: number, y: number): [number, number] {
-  let p3x = fractScalar(x * 0.1031);
-  let p3y = fractScalar(y * 0.103);
-  let p3z = fractScalar(x * 0.0973);
+  const vx = x + 31.73;
+  const vy = y + 19.41;
+  let p3x = fractScalar(vx * 0.1031);
+  let p3y = fractScalar(vy * 0.103);
+  let p3z = fractScalar(vx * 0.0973);
   const d = p3x * (p3y + 33.33) + p3y * (p3z + 33.33) + p3z * (p3x + 33.33);
   p3x += d;
   p3y += d;
   p3z += d;
   return [fractScalar((p3x + p3y) * p3z), fractScalar((p3y + p3z) * p3y)];
+}
+
+function jsNoise2D(x: number, y: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const a = jsHash21(ix, iy);
+  const b = jsHash21(ix + 1, iy);
+  const c = jsHash21(ix, iy + 1);
+  const d = jsHash21(ix + 1, iy + 1);
+  return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function smoothstepJS(edge0: number, edge1: number, x: number): number {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
 }
 
 export class GrassSamplePreview {
@@ -332,13 +357,56 @@ export class GrassSamplePreview {
         )
       );
       const jitter = gHash22Sample(hashSeed).sub(0.5);
-      const rawWorldXZ = aCellOffset.add(0.5).add(jitter.mul(0.92)).mul(uCellSpacing);
+      // Wide cross-cell jitter breaks up square cell boundaries
+      const rawWorldXZ = aCellOffset.add(0.5).add(jitter.mul(1.52)).mul(uCellSpacing);
 
-      const clumpGridScale = float(0.62);
-      const clumpCell = floor(rawWorldXZ.mul(clumpGridScale));
-      const clumpHash = gHash22Sample(clumpCell.add(vec2(uSeedShift.mul(7.1), uSeedShift.mul(13.3))));
-      const clumpCenterXZ = clumpCell.add(0.22).add(clumpHash.mul(0.56)).div(clumpGridScale);
-      const clumpPull = clamp(uTuftClumpiness, 0.0, 1.0).mul(0.58);
+      const seedVec = vec2(uSeedShift.mul(7.1), uSeedShift.mul(13.3));
+      const warpX = gNoise2DSample(rawWorldXZ.mul(0.28).add(vec2(5.2, 1.3)).add(seedVec)).sub(0.5);
+      const warpZ = gNoise2DSample(rawWorldXZ.mul(0.28).add(vec2(18.7, 9.4)).add(seedVec)).sub(0.5);
+      const warpedXZ = rawWorldXZ.add(vec2(warpX, warpZ).mul(1.35));
+      const clumpGridScale = float(0.58);
+      const warpedScaled = warpedXZ.mul(clumpGridScale);
+      const baseClump = floor(warpedScaled.sub(0.5));
+
+      const evalSite = (ox: number, oz: number) => {
+        const c = baseClump.add(vec2(ox, oz));
+        const h = gHash22Sample(c.add(seedVec));
+        const w = gHash21Sample(c.add(vec2(7.7, 23.1)).add(seedVec));
+        const siteScaled = c.add(0.14).add(h.mul(0.72));
+        const diffScaled = siteScaled.sub(warpedScaled);
+        const d2 = dot(diffScaled, diffScaled).mul(mix(0.68, 1.42, w));
+        return { diffScaled, h, w, d2 };
+      };
+
+      const s00 = evalSite(0, 0);
+      const s10 = evalSite(1, 0);
+      const s01 = evalSite(0, 1);
+      const s11 = evalSite(1, 1);
+
+      const pickA = s00.d2.lessThanEqual(s10.d2);
+      const aDiff = select(pickA, s00.diffScaled, s10.diffScaled);
+      const aHash = select(pickA, s00.h, s10.h);
+      const aW = select(pickA, s00.w, s10.w);
+      const aD2 = min(s00.d2, s10.d2);
+
+      const pickB = s01.d2.lessThanEqual(s11.d2);
+      const bDiff = select(pickB, s01.diffScaled, s11.diffScaled);
+      const bHash = select(pickB, s01.h, s11.h);
+      const bW = select(pickB, s01.w, s11.w);
+      const bD2 = min(s01.d2, s11.d2);
+
+      const pickBest = aD2.lessThanEqual(bD2);
+      const clumpDiffXZ = select(pickBest, aDiff, bDiff).div(clumpGridScale);
+      const clumpHash = select(pickBest, aHash, bHash);
+      const clumpWeight = select(pickBest, aW, bW);
+
+      const clumpCenterXZ = rawWorldXZ.add(clumpDiffXZ);
+      const clumpDist = length(clumpDiffXZ);
+      const bladePullRnd = gHash21Sample(hashSeed.add(vec2(29.4, 51.8)));
+      const clumpPull = clamp(uTuftClumpiness, 0.0, 1.0)
+        .mul(0.66)
+        .mul(mix(0.62, 1.0, clumpWeight))
+        .mul(mix(0.45, 1.0, bladePullRnd));
       const worldXZ = mix(rawWorldXZ, clumpCenterXZ, clumpPull);
 
       const clipPos = vec4(2.0, 2.0, 2.0, 1.0).toVar();
@@ -347,7 +415,25 @@ export class GrassSamplePreview {
         .lessThanEqual(halfBound)
         .and(abs(worldXZ.y).lessThanEqual(halfBound));
 
-      If(insidePatch, () => {
+      const densityRnd = gHash21Sample(hashSeed.add(vec2(17.3, 5.9)));
+      const meadowDrift = gNoise2DSample(worldXZ.mul(0.28).add(vec2(3.1, 8.7)).add(seedVec))
+        .mul(0.62)
+        .add(gNoise2DSample(worldXZ.mul(0.68).add(vec2(19.4, 2.3)).add(seedVec)).mul(0.38));
+      const clumpAffinity = float(1.0).sub(smoothstep(0.22, 1.12, clumpDist));
+      const baseNaturalDensity = mix(0.76, 1.0, smoothstep(0.16, 0.78, meadowDrift));
+      const clumpGapMod = mix(
+        0.42,
+        1.0,
+        clamp(clumpAffinity.mul(0.72).add(meadowDrift.mul(0.28)), 0.0, 1.0)
+      );
+      const organicDensity = mix(
+        baseNaturalDensity,
+        clumpGapMod,
+        clamp(uTuftClumpiness, 0.0, 1.0).mul(0.68)
+      );
+      const densityKeep = densityRnd.lessThanEqual(organicDensity);
+
+      If(insidePatch.and(densityKeep), () => {
         const clumpNoise = gNoise2DSample(worldXZ.mul(0.32));
         const bladeRnd = gHash21Sample(hashSeed.add(vec2(43.1, 88.4)));
 
@@ -708,12 +794,13 @@ export class GrassSamplePreview {
       this.lastGuideKey = guideKey;
       const halfBound = halfPatch - 0.06;
       let bladeCount = 0;
-      const clumpMap = new Map<string, { x: number; z: number }>();
+      const clumpAccum = new Map<string, { sumX: number; sumZ: number; count: number }>();
 
       if (quality !== 'off') {
         const halfCells = Math.ceil((halfPatch + 1.2) / spec.nearSpacing);
-        const clumpGridScale = 0.62;
-        const clumpPull = clumpiness * 0.58;
+        const clumpGridScale = 0.58;
+        const seedX = seed * 7.1;
+        const seedZ = seed * 13.3;
 
         for (let dz = -halfCells; dz <= halfCells; dz++) {
           for (let dx = -halfCells; dx <= halfCells; dx++) {
@@ -721,32 +808,88 @@ export class GrassSamplePreview {
               const sx = dx + b * 37.13 + seed * 19.7;
               const sz = dz + b * 91.7 + seed * 41.3;
               const [jx, jz] = jsHash22(sx, sz);
-              const rawX = (dx + 0.5 + (jx - 0.5) * 0.92) * spec.nearSpacing;
-              const rawZ = (dz + 0.5 + (jz - 0.5) * 0.92) * spec.nearSpacing;
+              const rawX = (dx + 0.5 + (jx - 0.5) * 1.52) * spec.nearSpacing;
+              const rawZ = (dz + 0.5 + (jz - 0.5) * 1.52) * spec.nearSpacing;
 
-              const cxCell = Math.floor(rawX * clumpGridScale);
-              const czCell = Math.floor(rawZ * clumpGridScale);
-              const [chx, chz] = jsHash22(cxCell + seed * 7.1, czCell + seed * 13.3);
-              const cCenterX = (cxCell + 0.22 + chx * 0.56) / clumpGridScale;
-              const cCenterZ = (czCell + 0.22 + chz * 0.56) / clumpGridScale;
+              const warpX = jsNoise2D(rawX * 0.28 + 5.2 + seedX, rawZ * 0.28 + 1.3 + seedZ) - 0.5;
+              const warpZ = jsNoise2D(rawX * 0.28 + 18.7 + seedX, rawZ * 0.28 + 9.4 + seedZ) - 0.5;
+              const warpedX = rawX + warpX * 1.35;
+              const warpedZ = rawZ + warpZ * 1.35;
+              const warpedSX = warpedX * clumpGridScale;
+              const warpedSZ = warpedZ * clumpGridScale;
+              const baseCX = Math.floor(warpedSX - 0.5);
+              const baseCZ = Math.floor(warpedSZ - 0.5);
 
-              const wx = rawX + (cCenterX - rawX) * clumpPull;
-              const wz = rawZ + (cCenterZ - rawZ) * clumpPull;
-              if (Math.abs(wx) <= halfBound && Math.abs(wz) <= halfBound) {
-                bladeCount++;
-                const cKey = `${cxCell}:${czCell}`;
-                if (
-                  !clumpMap.has(cKey) &&
-                  Math.abs(cCenterX) <= halfBound &&
-                  Math.abs(cCenterZ) <= halfBound
-                ) {
-                  clumpMap.set(cKey, { x: cCenterX, z: cCenterZ });
+              let bestKey = '';
+              let bestDiffSX = 0;
+              let bestDiffSZ = 0;
+              let bestW = 0;
+              let bestD2 = Infinity;
+
+              for (let oz = 0; oz <= 1; oz++) {
+                for (let ox = 0; ox <= 1; ox++) {
+                  const cx = baseCX + ox;
+                  const cz = baseCZ + oz;
+                  const [hx, hz] = jsHash22(cx + seedX, cz + seedZ);
+                  const w = jsHash21(cx + 7.7 + seedX, cz + 23.1 + seedZ);
+                  const siteX = cx + 0.14 + hx * 0.72;
+                  const siteZ = cz + 0.14 + hz * 0.72;
+                  const diffX = siteX - warpedSX;
+                  const diffZ = siteZ - warpedSZ;
+                  const d2 = (diffX * diffX + diffZ * diffZ) * (0.68 + (1.42 - 0.68) * w);
+                  if (d2 < bestD2) {
+                    bestD2 = d2;
+                    bestDiffSX = diffX;
+                    bestDiffSZ = diffZ;
+                    bestW = w;
+                    bestKey = `${cx}:${cz}`;
+                  }
                 }
-                // Keep jsHash21 referenced cleanly for deterministic parity
-                void jsHash21(sx, sz);
+              }
+
+              const diffMX = bestDiffSX / clumpGridScale;
+              const diffMZ = bestDiffSZ / clumpGridScale;
+              const clumpDist = Math.hypot(diffMX, diffMZ);
+              const bladePullRnd = jsHash21(sx + 29.4, sz + 51.8);
+              const clumpPull =
+                clumpiness *
+                0.66 *
+                (0.62 + 0.38 * bestW) *
+                (0.45 + 0.55 * bladePullRnd);
+
+              const wx = rawX + diffMX * clumpPull;
+              const wz = rawZ + diffMZ * clumpPull;
+              if (Math.abs(wx) > halfBound || Math.abs(wz) > halfBound) continue;
+
+              const densityRnd = jsHash21(sx + 17.3, sz + 5.9);
+              const meadowDrift =
+                jsNoise2D(wx * 0.28 + 3.1 + seedX, wz * 0.28 + 8.7 + seedZ) * 0.62 +
+                jsNoise2D(wx * 0.68 + 19.4 + seedX, wz * 0.68 + 2.3 + seedZ) * 0.38;
+              const clumpAffinity = 1.0 - smoothstepJS(0.22, 1.12, clumpDist);
+              const baseNaturalDensity = 0.76 + 0.24 * smoothstepJS(0.16, 0.78, meadowDrift);
+              const clumpGapMod = 0.42 + 0.58 * clamp01(clumpAffinity * 0.72 + meadowDrift * 0.28);
+              const organicDensity =
+                baseNaturalDensity + (clumpGapMod - baseNaturalDensity) * (clumpiness * 0.68);
+              if (densityRnd > organicDensity) continue;
+
+              bladeCount++;
+              const prev = clumpAccum.get(bestKey);
+              if (prev) {
+                prev.sumX += wx;
+                prev.sumZ += wz;
+                prev.count++;
+              } else {
+                clumpAccum.set(bestKey, { sumX: wx, sumZ: wz, count: 1 });
               }
             }
           }
+        }
+      }
+
+      const clumpAnchors: { x: number; z: number }[] = [];
+      for (const acc of clumpAccum.values()) {
+        if (acc.count >= 2) {
+          clumpAnchors.push({ x: acc.sumX / acc.count, z: acc.sumZ / acc.count });
         }
       }
 
@@ -756,11 +899,11 @@ export class GrassSamplePreview {
         patchAreaSqM,
         bladeCount,
         bladesPerSqM: patchAreaSqM > 0 ? bladeCount / patchAreaSqM : 0,
-        clumpCount: clumpMap.size,
+        clumpCount: clumpAnchors.length,
         cellSpacingM: spec.nearSpacing,
         bladesPerCell: spec.nearBladesPerCell,
       };
-      this.rebuildClumpGuides(Array.from(clumpMap.values()), opts.showGuides);
+      this.rebuildClumpGuides(clumpAnchors, opts.showGuides);
     }
 
     return this.lastStats;

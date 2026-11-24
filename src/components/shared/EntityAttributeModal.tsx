@@ -24,12 +24,16 @@ import type {
   EntityRolePreset,
   LevelEntity,
   MisfitAbilityId,
+  ObjectInteractionAttributeId,
+  ObjectInteractionCalibration,
 } from '../../types/maker';
+import { OBJECT_INTERACTION_ATTRIBUTES } from '../../data/motionLibrary';
 import { AssetThumbnail } from './AssetThumbnail';
 import { ChatBubbleStudioModal } from './ChatBubbleStudioModal';
 import { DialogueVoiceEditor } from './DialogueVoiceEditor';
 import { EntityItemAssignPanel } from './EntityItemAssignPanel';
 import { FieldLabel } from './MakerUI';
+import { ObjectInteractionTestModal } from './ObjectInteractionTestModal';
 
 const ROLE_PRESET_OPTIONS: {
   id: EntityRolePreset;
@@ -82,6 +86,7 @@ export const EntityAttributeModal: React.FC<{ store: MakerStore }> = ({ store })
   const currentProject = store.currentProject;
   const currentLevel = store.currentLevel;
   const [chatTargetId, setChatTargetId] = useState<string | null>(null);
+  const [showInteractionTester, setShowInteractionTester] = useState(false);
 
   const entity = useMemo(() => {
     if (!target || target.kind !== 'entity' || !currentLevel) return null;
@@ -611,6 +616,94 @@ export const EntityAttributeModal: React.FC<{ store: MakerStore }> = ({ store })
             {/* Inventory / Pickup / Reward */}
             <EntityItemAssignPanel entity={entity} store={store} />
 
+            {/* Interaction Attributes & Character Calibration */}
+            {entity.kind !== 'fxEmitter' && entity.kind !== 'hero' && (() => {
+              const resolvedAttrs =
+                entity.interactionAttributes ?? boundAsset?.interactionAttributes ?? [];
+              const resolvedCals =
+                entity.interactionCalibrations ?? boundAsset?.interactionCalibrations ?? {};
+              return (
+                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-[#1F2430] space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <FieldLabel text="Interaction Attributes (Object Actions)" />
+                    <button
+                      type="button"
+                      onClick={() => setShowInteractionTester(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#7C5CFF] hover:bg-[#6A48F5] text-white text-[11px] font-bold whitespace-nowrap"
+                    >
+                      <Sparkles size={12} />
+                      <span>Test & Calibrate Character</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {OBJECT_INTERACTION_ATTRIBUTES.map((attr) => {
+                      const checked = resolvedAttrs.includes(attr.id);
+                      return (
+                        <label
+                          key={attr.id}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                            checked
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-white dark:bg-[#171A23] border-slate-200/70 dark:border-white/[0.06] text-slate-600 dark:text-[#A5AEC4]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              const next = checked
+                                ? resolvedAttrs.filter((id) => id !== attr.id)
+                                : [...resolvedAttrs, attr.id];
+                              store.updateEntity(
+                                entity.id,
+                                `toggle ${attr.label} attribute`,
+                                (ent) => ({
+                                  ...ent,
+                                  interactionAttributes: next,
+                                })
+                              );
+                            }}
+                            className="accent-[#10B981] w-3.5 h-3.5 shrink-0"
+                          />
+                          <span className="truncate">{attr.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {showInteractionTester && (
+                    <ObjectInteractionTestModal
+                      title={entity.name}
+                      attributes={resolvedAttrs}
+                      calibrations={resolvedCals}
+                      customAssetId={entity.customAssetId}
+                      entity={entity}
+                      customHeroAssetId={
+                        currentLevel?.entities.find((e) => e.kind === 'hero')?.customAssetId
+                      }
+                      onSaveCalibration={(attr, cal) => {
+                        const nextAttrs = resolvedAttrs.includes(attr)
+                          ? resolvedAttrs
+                          : [...resolvedAttrs, attr];
+                        const nextCals: Partial<
+                          Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+                        > = { ...resolvedCals, [attr]: cal };
+                        store.updateEntity(
+                          entity.id,
+                          `calibrate ${attr} interaction`,
+                          (ent) => ({
+                            ...ent,
+                            interactionAttributes: nextAttrs,
+                            interactionCalibrations: nextCals,
+                          })
+                        );
+                      }}
+                      onClose={() => setShowInteractionTester(false)}
+                    />
+                  )}
+                </div>
+              );
+            })()}
+
             {/* 3D Model Binding */}
             {entity.kind !== 'fxEmitter' && (
               <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-[#1F2430] flex flex-wrap items-center justify-between gap-2">
@@ -780,6 +873,79 @@ export const EntityAttributeModal: React.FC<{ store: MakerStore }> = ({ store })
                 </select>
               </label>
             </div>
+
+            {(() => {
+              const metaAttrs = assetMeta.interactionAttributes ?? [];
+              const metaCals = assetMeta.interactionCalibrations ?? {};
+              return (
+                <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-[#1F2430] space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <FieldLabel text="Default Interaction Attributes" />
+                    <button
+                      type="button"
+                      onClick={() => setShowInteractionTester(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#7C5CFF] hover:bg-[#6A48F5] text-white text-[11px] font-bold whitespace-nowrap"
+                    >
+                      <Sparkles size={12} />
+                      <span>Test & Calibrate Character</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {OBJECT_INTERACTION_ATTRIBUTES.map((attr) => {
+                      const checked = metaAttrs.includes(attr.id);
+                      return (
+                        <label
+                          key={attr.id}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-[11px] font-bold cursor-pointer ${
+                            checked
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                              : 'bg-white dark:bg-[#171A23] border-slate-200/70 dark:border-white/[0.06] text-slate-600 dark:text-[#A5AEC4]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              const next = checked
+                                ? metaAttrs.filter((id) => id !== attr.id)
+                                : [...metaAttrs, attr.id];
+                              saveMetaPatch({ interactionAttributes: next });
+                            }}
+                            className="accent-[#10B981] w-3.5 h-3.5 shrink-0"
+                          />
+                          <span className="truncate">{attr.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {showInteractionTester && (
+                    <ObjectInteractionTestModal
+                      title={assetMeta.name}
+                      attributes={metaAttrs}
+                      calibrations={metaCals}
+                      objectDoc={assetMeta.objectRecipe}
+                      customAssetId={assetMeta.id}
+                      customHeroAssetId={
+                        currentLevel?.entities.find((e) => e.kind === 'hero')?.customAssetId
+                      }
+                      onSaveCalibration={(attr, cal) => {
+                        const nextAttrs = metaAttrs.includes(attr)
+                          ? metaAttrs
+                          : [...metaAttrs, attr];
+                        const nextCals: Partial<
+                          Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+                        > = { ...metaCals, [attr]: cal };
+                        saveMetaPatch({
+                          interactionAttributes: nextAttrs,
+                          interactionCalibrations: nextCals,
+                        });
+                      }}
+                      onClose={() => setShowInteractionTester(false)}
+                    />
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

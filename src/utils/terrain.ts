@@ -1322,7 +1322,11 @@ export function defaultScatter(): ScatterItem[] {
     });
   }
 
-  // 2. Trailside grass tufts, flanking rocks & wildflowers lining both edges of the recessed dirt trail
+  // 2. Trailside grass drifts, flanking rocks & wildflowers (natural irregular spacing along trail edges)
+  const scatterRand = (n: number): number => {
+    const s = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+    return s - Math.floor(s);
+  };
   for (let i = 4; i < TerrainPaths.samples.length - 4; i += 2) {
     const s = TerrainPaths.samples[i];
     if (IslandRiver.distanceTo(s.x, s.z) < 8.5) continue;
@@ -1330,18 +1334,27 @@ export function defaultScatter(): ScatterItem[] {
     const nx = -s.tz;
     const nz = s.tx;
     for (const side of [-1, 1]) {
-      const grassOffset = 2.25 + ((i * 7 + (side > 0 ? 3 : 1)) % 5) * 0.25;
-      const gx = s.x + nx * side * grassOffset;
-      const gz = s.z + nz * side * grassOffset;
-      if (Math.hypot(gx, gz) < IslandTerrain.radius * 0.94) {
-        items.push({
-          id: uid(),
-          kind: i % 8 === 0 ? 'bush' : 'tallGrass',
-          x: gx,
-          z: gz,
-          size: 0.9 + ((i + side) % 3) * 0.22,
-          rotation: (i * 0.9 + side) % (Math.PI * 2),
-        });
+      const gate = scatterRand(i * 13.7 + side * 41.3);
+      if (gate > 0.34) {
+        const tuftCount = gate > 0.82 ? 2 : 1;
+        for (let t = 0; t < tuftCount; t++) {
+          const r1 = scatterRand(i * 19.3 + side * 7.1 + t * 53.9);
+          const r2 = scatterRand(i * 31.1 + side * 11.7 + t * 29.3);
+          const grassOffset = 2.05 + r1 * 1.95;
+          const alongShift = (r2 - 0.5) * 1.8;
+          const gx = s.x + nx * side * grassOffset + s.tx * alongShift;
+          const gz = s.z + nz * side * grassOffset + s.tz * alongShift;
+          if (Math.hypot(gx, gz) < IslandTerrain.radius * 0.94) {
+            items.push({
+              id: uid(),
+              kind: i % 8 === 0 && t === 0 ? 'bush' : 'tallGrass',
+              x: gx,
+              z: gz,
+              size: 0.72 + r2 * 0.62,
+              rotation: r1 * Math.PI * 2,
+            });
+          }
+        }
       }
 
       if (i % 5 === 0) {
@@ -1459,6 +1472,11 @@ export function defaultScatter(): ScatterItem[] {
 export function generateLushGroundFlora(): ScatterItem[] {
   const items: ScatterItem[] = [];
 
+  const floraRand = (seed: number): number => {
+    const s = Math.sin(seed * 91.3458 + 47.231) * 47453.5453;
+    return s - Math.floor(s);
+  };
+
   const isValidGround = (x: number, z: number, minTrailDist: number, minRiverDist = 6.6): boolean => {
     const d = Math.hypot(x, z);
     if (d >= IslandTerrain.radius * 0.92) return false;
@@ -1472,19 +1490,24 @@ export function generateLushGroundFlora(): ScatterItem[] {
     return true;
   };
 
-  // A. Organic meadow & forest grass drifts (clustered tussocks complementing StylizedGrassSystem)
-  for (let i = 0; i < 180; i++) {
-    const angle = i * 2.39996 + 0.37;
-    const dist = 6 + Math.sqrt((i + 1) / 180) * (IslandTerrain.radius - 14);
+  // A. Organic meadow & forest grass drifts (irregular multi-tuft clusters + open glades)
+  for (let i = 0; i < 110; i++) {
+    const rAng = floraRand(i * 1.37 + 11.2);
+    const rDist = floraRand(i * 2.71 + 23.4);
+    const angle = rAng * Math.PI * 2;
+    const dist = 6 + Math.sqrt(0.06 + rDist * 0.94) * (IslandTerrain.radius - 14);
     const cx = Math.cos(angle) * dist;
     const cz = Math.sin(angle) * dist;
     if (!isValidGround(cx, cz, 2.55, 6.2)) continue;
 
-    // 2 clustered grass tufts per meadow patch
-    const clusterSize = 2;
+    // Gate drifts by organic meadow patch field so thickets & clearings alternate naturally
+    const gladeField = (organicMossPatch(cx * 1.15, cz * 1.15) + 1) * 0.5;
+    if (gladeField + floraRand(i * 3.19) * 0.35 < 0.42) continue;
+
+    const clusterSize = 1 + Math.floor(floraRand(i * 5.43 + 7.1) * 5); // 1..5 irregular tufts
     for (let k = 0; k < clusterSize; k++) {
-      const subAng = angle * 1.9 + k * 2.15;
-      const subR = k === 0 ? 0 : 0.75 + ((i + k * 3) % 4) * 0.42;
+      const subAng = floraRand(i * 17.1 + k * 41.3) * Math.PI * 2;
+      const subR = k === 0 ? floraRand(i * 7.7) * 0.45 : 0.45 + floraRand(i * 29.3 + k * 13.7) * 2.65;
       const gx = cx + Math.cos(subAng) * subR;
       const gz = cz + Math.sin(subAng) * subR;
       if (!isValidGround(gx, gz, 2.35, 6.0)) continue;
@@ -1493,55 +1516,63 @@ export function generateLushGroundFlora(): ScatterItem[] {
         kind: 'tallGrass',
         x: gx,
         z: gz,
-        size: 0.78 + ((i * 5 + k * 7) % 6) * 0.14,
-        rotation: (i * 1.43 + k * 2.1) % (Math.PI * 2),
+        size: 0.68 + floraRand(i * 11.9 + k * 19.7) * 0.72,
+        rotation: floraRand(i * 23.1 + k * 37.9) * Math.PI * 2,
       });
     }
   }
 
-  // B. Leafy woodland bushes & berry/flowering shrubs scattered through glades & forest borders
+  // B. Leafy woodland bushes & berry/flowering shrubs scattered in irregular glade pockets
   for (let i = 0; i < 290; i++) {
-    const angle = i * 2.39996 + 1.15;
-    const dist = 8 + Math.sqrt((i + 0.5) / 290) * (IslandTerrain.radius - 16);
+    const rA = floraRand(i * 3.13 + 101.5);
+    const rD = floraRand(i * 4.79 + 202.3);
+    const angle = rA * Math.PI * 2;
+    const dist = 8 + Math.sqrt(rD) * (IslandTerrain.radius - 16);
     const bx = Math.cos(angle) * dist;
     const bz = Math.sin(angle) * dist;
     if (!isValidGround(bx, bz, 3.45, 7.2)) continue;
     if (terrainSlopeAt(bx, bz, 0.85) > 0.55) continue;
 
-    const isBerry = i % 5 === 1 || i % 7 === 0;
+    const isBerry = floraRand(i * 7.3 + 5.1) < 0.32;
     items.push({
       id: uid(),
       kind: isBerry ? 'berryBush' : 'bush',
       x: bx,
       z: bz,
-      size: isBerry ? 0.88 + (i % 4) * 0.15 : 0.82 + (i % 5) * 0.17,
-      rotation: (i * 1.91) % (Math.PI * 2),
+      size: 0.76 + floraRand(i * 9.7 + 3.3) * 0.66,
+      rotation: floraRand(i * 13.1) * Math.PI * 2,
     });
   }
 
-  // C. Woodland ferns tucked into mossy hollows, shaded groves, and damp banks
-  for (let i = 0; i < 280; i++) {
-    const angle = i * 2.39996 + 2.08;
-    const dist = 7 + Math.sqrt((i + 0.8) / 280) * (IslandTerrain.radius - 15);
+  // C. Woodland ferns clustered in damp hollows & shaded groves
+  for (let i = 0; i < 240; i++) {
+    const angle = floraRand(i * 5.21 + 303.1) * Math.PI * 2;
+    const dist = 7 + Math.sqrt(floraRand(i * 6.43 + 404.7)) * (IslandTerrain.radius - 15);
     const fx = Math.cos(angle) * dist;
     const fz = Math.sin(angle) * dist;
     if (!isValidGround(fx, fz, 2.7, 5.8)) continue;
     if (terrainSlopeAt(fx, fz, 0.75) > 0.52) continue;
 
-    items.push({
-      id: uid(),
-      kind: 'fern',
-      x: fx,
-      z: fz,
-      size: 0.82 + (i % 5) * 0.15,
-      rotation: (i * 1.27) % (Math.PI * 2),
-    });
+    const clumpN = floraRand(i * 8.11) > 0.68 ? 2 : 1;
+    for (let k = 0; k < clumpN; k++) {
+      const ox = k === 0 ? 0 : (floraRand(i * 15.7 + k) - 0.5) * 2.1;
+      const oz = k === 0 ? 0 : (floraRand(i * 21.3 + k) - 0.5) * 2.1;
+      if (!isValidGround(fx + ox, fz + oz, 2.6, 5.7)) continue;
+      items.push({
+        id: uid(),
+        kind: 'fern',
+        x: fx + ox,
+        z: fz + oz,
+        size: 0.76 + floraRand(i * 11.3 + k * 4.9) * 0.62,
+        rotation: floraRand(i * 19.9 + k * 7.3) * Math.PI * 2,
+      });
+    }
   }
 
-  // D. Broadleaf woodland plants (hostas / low ground foliage rosettes) along forest floor & trail borders
-  for (let i = 0; i < 210; i++) {
-    const angle = i * 2.39996 + 2.86;
-    const dist = 6 + Math.sqrt((i + 0.4) / 210) * (IslandTerrain.radius - 15);
+  // D. Broadleaf woodland plants along forest floor & shaded banks
+  for (let i = 0; i < 200; i++) {
+    const angle = floraRand(i * 7.37 + 505.9) * Math.PI * 2;
+    const dist = 6 + Math.sqrt(floraRand(i * 8.53 + 606.2)) * (IslandTerrain.radius - 15);
     const px = Math.cos(angle) * dist;
     const pz = Math.sin(angle) * dist;
     if (!isValidGround(px, pz, 2.55, 6.2)) continue;
@@ -1552,15 +1583,15 @@ export function generateLushGroundFlora(): ScatterItem[] {
       kind: 'broadleaf',
       x: px,
       z: pz,
-      size: 0.8 + (i % 4) * 0.18,
-      rotation: (i * 2.13) % (Math.PI * 2),
+      size: 0.76 + floraRand(i * 14.3) * 0.64,
+      rotation: floraRand(i * 16.9) * Math.PI * 2,
     });
   }
 
   // E. Forest floor mushroom clusters in shady mossy hollows
-  for (let i = 0; i < 140; i++) {
-    const angle = i * 2.39996 + 3.74;
-    const dist = 9 + Math.sqrt((i + 0.6) / 140) * (IslandTerrain.radius - 18);
+  for (let i = 0; i < 120; i++) {
+    const angle = floraRand(i * 9.17 + 707.4) * Math.PI * 2;
+    const dist = 9 + Math.sqrt(floraRand(i * 10.31 + 808.6)) * (IslandTerrain.radius - 18);
     const mx = Math.cos(angle) * dist;
     const mz = Math.sin(angle) * dist;
     if (!isValidGround(mx, mz, 2.9, 6.4)) continue;
@@ -1571,58 +1602,63 @@ export function generateLushGroundFlora(): ScatterItem[] {
       kind: 'mushroom',
       x: mx,
       z: mz,
-      size: 0.82 + (i % 4) * 0.16,
-      rotation: (i * 1.67) % (Math.PI * 2),
+      size: 0.78 + floraRand(i * 18.1) * 0.56,
+      rotation: floraRand(i * 22.7) * Math.PI * 2,
     });
   }
 
-  // F. Sunlit wildflower meadow drifts (tight 2-bloom clusters on gentle clearings)
-  for (let i = 0; i < 72; i++) {
-    const angle = i * 2.39996 + 4.55;
-    const dist = 10 + Math.sqrt((i + 0.5) / 72) * (IslandTerrain.radius - 18);
+  // F. Sunlit wildflower meadow drifts (irregular 1–4 bloom clusters on gentle clearings)
+  for (let i = 0; i < 64; i++) {
+    const angle = floraRand(i * 11.41 + 909.8) * Math.PI * 2;
+    const dist = 10 + Math.sqrt(floraRand(i * 12.67 + 1010.3)) * (IslandTerrain.radius - 18);
     const wx = Math.cos(angle) * dist;
     const wz = Math.sin(angle) * dist;
     if (!isValidGround(wx, wz, 2.7, 7.0)) continue;
     if (terrainSlopeAt(wx, wz, 0.75) > 0.32) continue;
 
-    for (let k = 0; k < 2; k++) {
-      const fx = wx + (k === 0 ? 0 : Math.cos(i * 1.3) * 0.95);
-      const fz = wz + (k === 0 ? 0 : Math.sin(i * 1.3) * 0.95);
+    const bloomCount = 1 + Math.floor(floraRand(i * 19.1) * 3);
+    for (let k = 0; k < bloomCount; k++) {
+      const ang = floraRand(i * 27.3 + k * 14.9) * Math.PI * 2;
+      const rad = k === 0 ? 0 : 0.45 + floraRand(i * 31.7 + k * 9.1) * 1.45;
+      const fx = wx + Math.cos(ang) * rad;
+      const fz = wz + Math.sin(ang) * rad;
       if (!isValidGround(fx, fz, 2.6, 6.8)) continue;
       items.push({
         id: uid(),
         kind: 'flower',
         x: fx,
         z: fz,
-        size: 0.85 + ((i + k) % 3) * 0.2,
-        rotation: (i * 0.95 + k * 1.7) % (Math.PI * 2),
+        size: 0.78 + floraRand(i * 35.1 + k * 5.7) * 0.52,
+        rotation: floraRand(i * 41.3 + k * 8.3) * Math.PI * 2,
       });
     }
   }
 
-  // G. Extra lush plants framing the hero's starting trail & scenic bends
+  // G. Irregular trail-margin flora pockets (skipped randomly so edges breathe naturally)
   for (let i = 6; i < TerrainPaths.samples.length - 6; i += 3) {
+    if (floraRand(i * 21.7 + 5.5) < 0.45) continue;
     const s = TerrainPaths.samples[i];
     if (IslandRiver.distanceTo(s.x, s.z) < 8.5) continue;
     if (isNearMountainCaveEntrance(s.x, s.z)) continue;
     const nx = -s.tz;
     const nz = s.tx;
-    const side = i % 2 === 0 ? 1 : -1;
-    const offset = 3.15 + (i % 4) * 0.45;
-    const tx = s.x + nx * side * offset;
-    const tz = s.z + nz * side * offset;
+    const side = floraRand(i * 13.9) > 0.5 ? 1 : -1;
+    const offset = 2.9 + floraRand(i * 17.3) * 1.85;
+    const along = (floraRand(i * 23.9) - 0.5) * 2.2;
+    const tx = s.x + nx * side * offset + s.tx * along;
+    const tz = s.z + nz * side * offset + s.tz * along;
     if (!isValidGround(tx, tz, 2.5, 6.8)) continue;
     if (terrainSlopeAt(tx, tz, 0.75) > 0.48) continue;
 
-    const roll = i % 12;
+    const rKind = floraRand(i * 29.1);
     const kind: ScatterItem['kind'] =
-      roll === 0
+      rKind < 0.16
         ? 'berryBush'
-        : roll === 3
+        : rKind < 0.34
         ? 'fern'
-        : roll === 6
+        : rKind < 0.5
         ? 'broadleaf'
-        : roll === 9
+        : rKind < 0.64
         ? 'bush'
         : 'tallGrass';
     items.push({
@@ -1630,8 +1666,8 @@ export function generateLushGroundFlora(): ScatterItem[] {
       kind,
       x: tx,
       z: tz,
-      size: 0.85 + (i % 4) * 0.16,
-      rotation: (i * 1.15) % (Math.PI * 2),
+      size: 0.76 + floraRand(i * 33.7) * 0.58,
+      rotation: floraRand(i * 39.3) * Math.PI * 2,
     });
   }
 

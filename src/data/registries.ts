@@ -692,6 +692,7 @@ export const RecipeLibrary: RuleRecipe[] = [
 export const StatLibrary: BindableStat[] = [
   { id: 'health', title: 'Health', symbol: 'heart.fill', isLive: true },
   { id: 'stamina', title: 'Stamina', symbol: 'figure.run', isLive: true },
+  { id: 'energy', title: 'Energy', symbol: 'bolt.fill', isLive: true },
   { id: 'magic', title: 'Magic', symbol: 'sparkles', isLive: true },
   { id: 'coins', title: 'Coins', symbol: 'circle.fill', isLive: true },
   { id: 'gems', title: 'Gems', symbol: 'diamond.fill', isLive: false },
@@ -777,10 +778,11 @@ export function defaultHUDProfile(): HUDProfile {
       makeWidget('bar', 'topLeading', 'health', '#F2545B', 'Health', 0, 0),
       makeWidget('bar', 'topLeading', 'stamina', '#22B573', 'Stamina', 0, 34),
       makeWidget('bar', 'topLeading', 'magic', '#3AA0FF', 'Magic', 0, 68),
+      makeWidget('bar', 'topLeading', 'energy', '#FACC15', 'Energy', 0, 102),
       makeWidget('counter', 'topTrailing', 'coins', '#F2C230', 'Coins', -52, 0),
       makeWidget('pauseButton', 'topTrailing', 'pause', '#F2545B', 'Pause', 0, 0),
       makeWidget('minimap', 'topTrailing', 'map', '#6C4CF1', 'Map', 0, 48),
-      makeWidget('objectiveList', 'topLeading', 'objectives', '#6C4CF1', 'Objectives', 0, 106),
+      makeWidget('objectiveList', 'topLeading', 'objectives', '#6C4CF1', 'Objectives', 0, 138),
       makeWidget('joystick', 'bottomLeading', 'move', '#1E2434', 'Move', 8, -8, {
         width: 112,
         height: 112,

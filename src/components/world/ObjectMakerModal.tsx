@@ -136,6 +136,8 @@ import type {
   MechanismTriggerRule,
   MotionEasing,
   ObjectGroupSpec,
+  ObjectInteractionAttributeId,
+  ObjectInteractionCalibration,
   ObjectMakerDoc,
   ObjectMechanism,
   ObjectPartSpec,
@@ -143,9 +145,11 @@ import type {
   VertexPaintStroke,
   WeatheringPreset,
 } from '../../types/maker';
+import { OBJECT_INTERACTION_ATTRIBUTES } from '../../data/motionLibrary';
 import { uid } from '../../utils/terrain';
 import { AssetThumbnail } from '../shared/AssetThumbnail';
 import { EASING_OPTIONS, EasingCurveIcon } from '../shared/MotionEditorPanel';
+import { ObjectInteractionTestModal } from '../shared/ObjectInteractionTestModal';
 
 export interface ObjectMakerModalProps {
   store: MakerStore;
@@ -154,7 +158,7 @@ export interface ObjectMakerModalProps {
 }
 
 type StudioToolMode = 'select' | 'translate' | 'rotate' | 'scale';
-type InspectorTab = 'shape' | 'material' | 'paint' | 'mechanics';
+type InspectorTab = 'shape' | 'material' | 'paint' | 'mechanics' | 'actions';
 type CameraPreset = 'threeQuarter' | 'front' | 'top';
 type HoleShapeKind = 'round' | 'square' | 'arch';
 type HoleAxisKind = 'x' | 'y' | 'z';
@@ -504,6 +508,13 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('prop');
   const [doc, setDoc] = useState<ObjectMakerDoc>(() => createStarterObjectDoc());
   const [mechanisms, setMechanisms] = useState<ObjectMechanism[]>([]);
+  const [interactionAttributes, setInteractionAttributes] = useState<
+    ObjectInteractionAttributeId[]
+  >([]);
+  const [interactionCalibrations, setInteractionCalibrations] = useState<
+    Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>
+  >({});
+  const [showInteractionTester, setShowInteractionTester] = useState(false);
   const [externalGlbMode, setExternalGlbMode] = useState<boolean>(false);
   const [externalGlbVersion, setExternalGlbVersion] = useState<number>(0);
 
@@ -606,6 +617,16 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
         JSON.parse(
           JSON.stringify(asset.vertexPaintStrokes ?? asset.objectRecipe?.vertexPaintStrokes ?? [])
         ) as VertexPaintStroke[]
+      );
+      setInteractionAttributes([
+        ...(asset.interactionAttributes ?? asset.objectRecipe?.interactionAttributes ?? []),
+      ]);
+      setInteractionCalibrations(
+        JSON.parse(
+          JSON.stringify(
+            asset.interactionCalibrations ?? asset.objectRecipe?.interactionCalibrations ?? {}
+          )
+        ) as Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>
       );
       setPlaceOnSave(false);
       setShowLoadMenu(false);
@@ -1414,6 +1435,12 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
           name: cleanName,
           category: assetCategory,
           mechanisms: mechanisms.length > 0 ? mechanisms : undefined,
+          interactionAttributes:
+            interactionAttributes.length > 0 ? interactionAttributes : undefined,
+          interactionCalibrations:
+            Object.keys(interactionCalibrations).length > 0
+              ? interactionCalibrations
+              : undefined,
           vertexPaintStrokes: strokesToSave,
           thumbnailDataUrl: nextThumb ?? existing.thumbnailDataUrl,
         };
@@ -1434,6 +1461,12 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
         const shiftedStrokes = paintStrokes.length > 0 ? shiftVertexPaintStrokes(paintStrokes, shift) : [];
         const docWithPaint: ObjectMakerDoc = {
           ...groundedDoc,
+          interactionAttributes:
+            interactionAttributes.length > 0 ? interactionAttributes : undefined,
+          interactionCalibrations:
+            Object.keys(interactionCalibrations).length > 0
+              ? interactionCalibrations
+              : undefined,
           vertexPaintStrokes: shiftedStrokes.length > 0 ? shiftedStrokes : undefined,
         };
 
@@ -1445,6 +1478,8 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
           category: assetCategory,
           buffer,
           mechanisms: shiftedMechs,
+          interactionAttributes,
+          interactionCalibrations,
           objectRecipe: docWithPaint,
           vertexPaintStrokes: shiftedStrokes.length > 0 ? shiftedStrokes : undefined,
           keepMetricScale: true,
@@ -1467,7 +1502,12 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
         const bx = hero ? Math.min(0.86, hero.position.x + 0.08) : 0.5;
         const by = hero ? Math.min(0.86, hero.position.y + 0.06) : 0.5;
         const placed = store.addEntity(kind, meta.name, { x: bx, y: by }, meta.id);
-        if (placed && ((meta.mechanisms && meta.mechanisms.length > 0) || meta.vertexPaintStrokes?.length)) {
+        if (
+          placed &&
+          ((meta.mechanisms && meta.mechanisms.length > 0) ||
+            meta.vertexPaintStrokes?.length ||
+            meta.interactionAttributes?.length)
+        ) {
           store.updateEntity(
             placed.id,
             `attach features to ${meta.name}`,
@@ -1475,6 +1515,18 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
               ...ent,
               ...(meta.mechanisms?.length
                 ? { mechanisms: JSON.parse(JSON.stringify(meta.mechanisms)) }
+                : {}),
+              ...(meta.interactionAttributes?.length
+                ? { interactionAttributes: [...meta.interactionAttributes] }
+                : {}),
+              ...(meta.interactionCalibrations
+                ? {
+                    interactionCalibrations: JSON.parse(
+                      JSON.stringify(meta.interactionCalibrations)
+                    ) as Partial<
+                      Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+                    >,
+                  }
                 : {}),
               ...(meta.vertexPaintStrokes?.length
                 ? {
@@ -3589,12 +3641,12 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
 
           {/* RIGHT CONTEXTUAL INSPECTOR */}
           <aside className="w-[320px] xl:w-[348px] shrink-0 border-l border-slate-200/80 dark:border-white/[0.08] bg-white dark:bg-[#171A23] flex flex-col min-h-0">
-            {/* 4 Tabs: Shape & Curve | Material | Paint | Mechanics */}
-            <div className="shrink-0 p-2 border-b border-slate-200/80 dark:border-white/[0.08] grid grid-cols-4 gap-1 bg-slate-50 dark:bg-[#131720]">
+            {/* 5 Tabs: Shape | Material | Paint | Joints | Actions */}
+            <div className="shrink-0 p-2 border-b border-slate-200/80 dark:border-white/[0.08] grid grid-cols-5 gap-1 bg-slate-50 dark:bg-[#131720]">
               <button
                 type="button"
                 onClick={() => setInspectorTab('shape')}
-                className={`py-1.5 px-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
                   inspectorTab === 'shape'
                     ? 'bg-[#7C5CFF] text-white'
                     : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
@@ -3606,7 +3658,7 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInspectorTab('material')}
-                className={`py-1.5 px-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
                   inspectorTab === 'material'
                     ? 'bg-[#7C5CFF] text-white'
                     : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
@@ -3618,7 +3670,7 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInspectorTab('paint')}
-                className={`py-1.5 px-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
                   inspectorTab === 'paint'
                     ? 'bg-[#EC4899] text-white'
                     : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
@@ -3630,7 +3682,7 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
               <button
                 type="button"
                 onClick={() => setInspectorTab('mechanics')}
-                className={`py-1.5 px-1.5 rounded-lg text-[11px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
+                className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
                   inspectorTab === 'mechanics'
                     ? 'bg-[#7C5CFF] text-white'
                     : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
@@ -3638,6 +3690,20 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
               >
                 <Wrench size={11} />
                 <span>Joints ({mechanisms.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInspectorTab('actions')}
+                className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap ${
+                  inspectorTab === 'actions'
+                    ? 'bg-[#10B981] text-white'
+                    : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Sparkles size={11} />
+                <span>
+                  Actions{interactionAttributes.length > 0 ? ` (${interactionAttributes.length})` : ''}
+                </span>
               </button>
             </div>
 
@@ -4765,10 +4831,96 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* TAB 5: CHARACTER INTERACTION ATTRIBUTES & CALIBRATION */}
+              {inspectorTab === 'actions' && (
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-[#10B981]/10 border border-[#10B981]/25 p-3 space-y-2">
+                    <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
+                      Object Interaction Attributes
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-[#949BB0] leading-snug">
+                      Check every action the hero can perform with this object, then test & calibrate character alignment on the 3D stage.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowInteractionTester(true)}
+                      className="w-full py-2 px-3 rounded-xl bg-[#7C5CFF] hover:bg-[#6A48F5] text-white text-xs font-extrabold inline-flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Play size={13} />
+                      <span>Test & Calibrate Character</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {OBJECT_INTERACTION_ATTRIBUTES.map((attr) => {
+                      const checked = interactionAttributes.includes(attr.id);
+                      const hasCal = Boolean(interactionCalibrations[attr.id]);
+                      return (
+                        <label
+                          key={attr.id}
+                          className={`flex items-start gap-2.5 p-2 rounded-xl border cursor-pointer transition-colors ${
+                            checked
+                              ? 'bg-emerald-500/10 border-emerald-500/40'
+                              : 'bg-slate-50 dark:bg-[#12151E] border-slate-200/80 dark:border-white/[0.06] hover:border-slate-300 dark:hover:border-white/[0.14]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setInteractionAttributes((prev) =>
+                                prev.includes(attr.id)
+                                  ? prev.filter((id) => id !== attr.id)
+                                  : [...prev, attr.id]
+                              )
+                            }
+                            className="mt-0.5 accent-[#10B981] w-3.5 h-3.5 shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-extrabold">{attr.label}</span>
+                              {hasCal && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#7C5CFF]/15 text-[#7C5CFF]">
+                                  Calibrated
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-500 dark:text-[#8E96AB] leading-snug">
+                              {attr.description}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
         </div>
       </div>
+
+      {showInteractionTester && (
+        <ObjectInteractionTestModal
+          title={objectName || 'Custom Object'}
+          attributes={interactionAttributes}
+          calibrations={interactionCalibrations}
+          objectDoc={!externalGlbMode ? doc : undefined}
+          customAssetId={externalGlbMode ? editingAssetId ?? undefined : undefined}
+          customHeroAssetId={
+            store.currentLevel?.entities.find((e) => e.kind === 'hero')?.customAssetId
+          }
+          onSaveCalibration={(attr, cal) => {
+            setInteractionAttributes((prev) =>
+              prev.includes(attr) ? prev : [...prev, attr]
+            );
+            setInteractionCalibrations((prev) => ({ ...prev, [attr]: cal }));
+            flashToast(`Calibrated "${attr}" offset`);
+          }}
+          onClose={() => setShowInteractionTester(false)}
+        />
+      )}
     </div>
   );
 };

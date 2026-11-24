@@ -18,6 +18,7 @@ export const DefaultPreviewHUDState: HUDState = {
   health: 6,
   maxHealth: 6,
   stamina: 85,
+  energy: 92,
   magic: 100,
   coins: 12,
   keys: 1,
@@ -59,6 +60,7 @@ export const HUDWidgetView: React.FC<{
   stickOffset?: { x: number; y: number };
   onStickPointerDown?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onActionPointerDown?: (action: ActionButtonBinding, e: React.PointerEvent<HTMLButtonElement>) => void;
+  onActionPointerUp?: (action: ActionButtonBinding, e: React.PointerEvent<HTMLButtonElement>) => void;
   onPauseTrigger?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onOpenInventory?: () => void;
 }> = ({
@@ -69,6 +71,7 @@ export const HUDWidgetView: React.FC<{
   stickOffset = { x: 0, y: 0 },
   onStickPointerDown,
   onActionPointerDown,
+  onActionPointerUp,
   onPauseTrigger,
   onOpenInventory,
 }) => {
@@ -86,6 +89,8 @@ export const HUDWidgetView: React.FC<{
         return Math.min(1, Math.max(0, state.health / Math.max(1, state.maxHealth)));
       case 'stamina':
         return Math.min(1, Math.max(0, state.stamina / 100));
+      case 'energy':
+        return Math.min(1, Math.max(0, (state.energy ?? 100) / 100));
       case 'magic':
         return Math.min(1, Math.max(0, state.magic / 100));
       default:
@@ -315,6 +320,21 @@ export const HUDWidgetView: React.FC<{
           onPointerDown={
             interactive
               ? (e) => onActionPointerDown?.(widget.actionId ?? 'jump', e)
+              : undefined
+          }
+          onPointerUp={
+            interactive
+              ? (e) => onActionPointerUp?.(widget.actionId ?? 'jump', e)
+              : undefined
+          }
+          onPointerLeave={
+            interactive
+              ? (e) => onActionPointerUp?.(widget.actionId ?? 'jump', e)
+              : undefined
+          }
+          onPointerCancel={
+            interactive
+              ? (e) => onActionPointerUp?.(widget.actionId ?? 'jump', e)
               : undefined
           }
           className={`w-full h-full flex flex-col items-center justify-center gap-0.5 text-white font-extrabold shadow-lg border-2 border-white/30 transition-transform ${

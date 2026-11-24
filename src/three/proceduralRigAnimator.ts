@@ -1503,13 +1503,13 @@ export class ProceduralRigController {
 
     if (slot !== this.lastSlot) {
       this.slotElapsed = 0;
-      if (slot === 'attack') {
+      if (slot === 'attack' || slot === 'swing') {
         this.attackElapsed = 0;
       }
     }
     this.lastSlot = slot;
     this.slotElapsed += clampedDt * effectiveSpeed;
-    if (slot === 'attack') {
+    if (slot === 'attack' || slot === 'swing') {
       this.attackElapsed += clampedDt * Math.max(0.25, speed * slotTuning.speedMultiplier);
     }
 
@@ -1839,7 +1839,7 @@ export class ProceduralRigController {
       return;
     }
 
-    if (slot === 'attack') {
+    if (slot === 'attack' || slot === 'swing') {
       // Forehand right-hand swing: wind back outward to the right with elbow bent back -> swing inward -> recover
       const cycle = (this.attackElapsed % 0.48) / 0.48;
       const armScale = slotTuning.armSwing;
@@ -1933,6 +1933,343 @@ export class ProceduralRigController {
       this.applyCharSpacePose('leftLowerLeg', 0.28 * strength * kneeScale, 0, 0, false);
       this.applyCharSpacePose('rightUpperLeg', 0.22 * strength * slotTuning.strideLength, 0, 0, true);
       this.applyCharSpacePose('rightLowerLeg', 0.24 * strength * kneeScale, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 24);
+      return;
+    }
+
+    if (slot === 'sit') {
+      const breath = Math.sin(t * 1.8);
+      const lookYaw = Math.sin(t * 0.65) * 0.14 * headMult;
+      const kneeScale = THREE.MathUtils.clamp(slotTuning.kneeBend, 0.4, 1.5);
+      const hipsCap = this.settings.boneMap.hips ? this.allBones.get(this.settings.boneMap.hips) : undefined;
+      if (hipsCap) {
+        const refLen = Math.max(0.05, Math.min(1.5, Math.abs(hipsCap.restPos.y) || 0.8));
+        hipsCap.node.position.y = hipsCap.restPos.y - 0.34 * refLen;
+      }
+      this.applyCharSpacePose('hips', -0.06, 0, 0);
+      this.applyCharSpacePose('spine', 0.08 + breath * 0.02, 0, 0);
+      this.applyCharSpacePose('chest', 0.06 + breath * 0.025, 0, 0);
+      this.applyCharSpacePose('head', -0.04 * headMult, lookYaw, 0);
+      this.applyCharSpacePose('leftUpperLeg', -1.42 * strength, 0, -0.09, false);
+      this.applyCharSpacePose('rightUpperLeg', -1.42 * strength, 0, 0.09, true);
+      this.applyCharSpacePose('leftLowerLeg', 1.44 * kneeScale * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', 1.44 * kneeScale * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', -0.42 * strength, 0, leftRelax * 0.85, false);
+      this.applyCharSpacePose('rightUpperArm', -0.42 * strength, 0, rightRelax * 0.85, true);
+      this.applyCharSpacePose('leftLowerArm', -0.62 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', -0.62 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'sleep') {
+      const breath = Math.sin(t * 1.3);
+      const hipsCap = this.settings.boneMap.hips ? this.allBones.get(this.settings.boneMap.hips) : undefined;
+      if (hipsCap) {
+        const refLen = Math.max(0.05, Math.min(1.5, Math.abs(hipsCap.restPos.y) || 0.8));
+        hipsCap.node.position.y = hipsCap.restPos.y - 0.72 * refLen;
+      }
+      this.applyCharSpacePose('hips', -Math.PI * 0.48, 0, 0);
+      this.applyCharSpacePose('spine', breath * 0.02, 0, 0);
+      this.applyCharSpacePose('chest', breath * 0.03, 0, 0);
+      this.applyCharSpacePose('head', 0.08 * headMult, 0.14 * headMult, 0.08 * headMult);
+      this.applyCharSpacePose('leftUpperArm', -0.15, 0, leftRelax * 0.45, false);
+      this.applyCharSpacePose('rightUpperArm', -0.15, 0, rightRelax * 0.45, true);
+      this.applyCharSpacePose('leftLowerArm', -0.35, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', -0.35, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', -0.08, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', -0.12, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', 0.12, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', 0.16, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 14);
+      return;
+    }
+
+    if (slot === 'climbVertical') {
+      const cyc = t * 5.4;
+      const reach = Math.sin(cyc);
+      const reachCos = Math.cos(cyc);
+      const armScale = slotTuning.armSwing;
+      const kneeScale = slotTuning.kneeBend;
+      this.applyCharSpacePose('hips', 0.06, reach * 0.09 * strength, 0);
+      this.applyCharSpacePose('spine', 0.14 * strength, reach * 0.1 * strength, 0);
+      this.applyCharSpacePose('chest', 0.1 * strength, reach * 0.08 * strength, 0);
+      this.applyCharSpacePose('head', -0.36 * headMult, 0, 0);
+      this.applyCharSpacePose('leftUpperArm', (-1.82 - reach * 0.62 * armScale) * strength, 0, leftRelax * 0.45, false);
+      this.applyCharSpacePose('rightUpperArm', (-1.82 + reach * 0.62 * armScale) * strength, 0, rightRelax * 0.45, true);
+      this.applyCharSpacePose('leftLowerArm', (-0.75 + reachCos * 0.35) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', (-0.75 - reachCos * 0.35) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', (-0.78 + reach * 0.45) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', (-0.78 - reach * 0.45) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', (1.12 - reach * 0.52) * strength * kneeScale, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', (1.12 + reach * 0.52) * strength * kneeScale, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 18);
+      return;
+    }
+
+    if (slot === 'climbStairs') {
+      const cyc = t * 6.4;
+      const s = Math.sin(cyc);
+      const c = Math.cos(cyc);
+      const armScale = slotTuning.armSwing;
+      const kneeScale = slotTuning.kneeBend;
+      this.applyCharSpacePose('spine', 0.18 * strength, s * 0.07 * strength, 0);
+      this.applyCharSpacePose('chest', 0.12 * strength, s * 0.06 * strength, 0);
+      this.applyCharSpacePose('head', -0.14 * headMult, 0, 0);
+      this.applyCharSpacePose('leftUpperLeg', (-0.52 + s * 0.54) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', (-0.52 - s * 0.54) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', (0.78 + Math.max(0, -s) * 0.65) * strength * kneeScale, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', (0.78 + Math.max(0, s) * 0.65) * strength * kneeScale, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', -s * 0.42 * armScale * strength, 0, leftRelax, false);
+      this.applyCharSpacePose('rightUpperArm', s * 0.42 * armScale * strength, 0, rightRelax, true);
+      this.applyCharSpacePose('leftLowerArm', (-0.36 - Math.max(0, c) * 0.25) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', (-0.36 - Math.max(0, -c) * 0.25) * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 18);
+      return;
+    }
+
+    if (slot === 'crouch' || slot === 'sneak') {
+      const isSneak = slot === 'sneak';
+      const step = isSneak ? Math.sin(t * 4.2) : 0;
+      const breath = Math.sin(t * 2.2) * 0.03;
+      const hipsCap = this.settings.boneMap.hips ? this.allBones.get(this.settings.boneMap.hips) : undefined;
+      if (hipsCap) {
+        const refLen = Math.max(0.05, Math.min(1.5, Math.abs(hipsCap.restPos.y) || 0.8));
+        hipsCap.node.position.y = hipsCap.restPos.y - (isSneak ? 0.24 : 0.28) * refLen;
+      }
+      this.applyCharSpacePose('spine', (isSneak ? 0.28 : 0.24) * strength + breath, step * 0.08, 0);
+      this.applyCharSpacePose('chest', 0.16 * strength, step * 0.06, 0);
+      this.applyCharSpacePose('head', -0.34 * headMult, Math.sin(t * 1.4) * 0.12 * headMult, 0);
+      this.applyCharSpacePose('leftUpperLeg', (-0.82 + step * 0.36) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', (-0.82 - step * 0.36) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', (1.28 + Math.max(0, step) * 0.28) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', (1.28 + Math.max(0, -step) * 0.28) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', (-0.28 - step * 0.25) * strength, 0, leftRelax * 1.1, false);
+      this.applyCharSpacePose('rightUpperArm', (-0.28 + step * 0.25) * strength, 0, rightRelax * 1.1, true);
+      this.applyCharSpacePose('leftLowerArm', -0.68 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', -0.68 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'hold') {
+      const sway = Math.sin(t * 2.1) * 0.04;
+      this.applyCharSpacePose('spine', 0.05 * strength, 0, 0);
+      this.applyCharSpacePose('chest', 0.04 * strength, 0, 0);
+      this.applyCharSpacePose('rightUpperArm', (-0.72 + sway) * strength, 0.15, rightRelax * 0.65, true);
+      this.applyCharSpacePose('rightLowerArm', -0.82 * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', sway * 0.5, 0, leftRelax, false);
+      this.applyCharSpacePose('leftLowerArm', -0.22 * strength, 0, 0, false);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'throw') {
+      const p = (this.slotElapsed % 0.85) / 0.85;
+      if (p < 0.38) {
+        const w = p / 0.38;
+        this.applyCharSpacePose('spine', -0.1 * w, -0.45 * w, 0);
+        this.applyCharSpacePose('rightUpperArm', -1.85 * w, -0.3 * w, rightRelax * 0.4 - 0.5 * w, true);
+        this.applyCharSpacePose('rightLowerArm', -1.05 * w, 0, 0, true);
+        this.applyCharSpacePose('leftUpperArm', -0.65 * w, 0.25 * w, leftRelax * 0.6, false);
+      } else {
+        const s = Math.min(1, (p - 0.38) / 0.34);
+        this.applyCharSpacePose('spine', THREE.MathUtils.lerp(-0.1, 0.28, s), THREE.MathUtils.lerp(-0.45, 0.55, s), 0);
+        this.applyCharSpacePose('rightUpperArm', THREE.MathUtils.lerp(-1.85, -0.42, s), THREE.MathUtils.lerp(-0.3, 0.45, s), rightRelax * 0.6, true);
+        this.applyCharSpacePose('rightLowerArm', THREE.MathUtils.lerp(-1.05, -0.18, s), 0, 0, true);
+        this.applyCharSpacePose('leftUpperArm', 0.25 * s, 0, leftRelax, false);
+      }
+      this.applyCharSpacePose('leftUpperLeg', -0.26 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.24 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 22);
+      return;
+    }
+
+    if (slot === 'fishing') {
+      const gentle = Math.sin(t * 2.0) * 0.05;
+      this.applyCharSpacePose('spine', 0.06 * strength, 0.14 * strength, 0);
+      this.applyCharSpacePose('chest', 0.04 * strength, 0.1 * strength, 0);
+      this.applyCharSpacePose('head', -0.08 * headMult, 0.1 * headMult, 0);
+      this.applyCharSpacePose('rightUpperArm', (-0.75 + gentle) * strength, 0.12, rightRelax * 0.5, true);
+      this.applyCharSpacePose('rightLowerArm', -0.45 * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', (-0.42 - gentle * 0.5) * strength, -0.2, leftRelax * 0.65, false);
+      this.applyCharSpacePose('leftLowerArm', -0.58 * strength, 0, 0, false);
+      this.applyCharSpacePose('leftUpperLeg', -0.15 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.15 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'lift') {
+      const p = 0.5 + 0.5 * Math.sin(t * 2.6);
+      const hipsCap = this.settings.boneMap.hips ? this.allBones.get(this.settings.boneMap.hips) : undefined;
+      if (hipsCap) {
+        const refLen = Math.max(0.05, Math.min(1.5, Math.abs(hipsCap.restPos.y) || 0.8));
+        hipsCap.node.position.y = hipsCap.restPos.y - (1 - p) * 0.24 * refLen;
+      }
+      this.applyCharSpacePose('spine', THREE.MathUtils.lerp(0.36, -0.05, p) * strength, 0, 0);
+      this.applyCharSpacePose('leftUpperArm', THREE.MathUtils.lerp(-0.95, -2.05, p) * strength, 0, leftRelax * 0.55, false);
+      this.applyCharSpacePose('rightUpperArm', THREE.MathUtils.lerp(-0.95, -2.05, p) * strength, 0, rightRelax * 0.55, true);
+      this.applyCharSpacePose('leftLowerArm', THREE.MathUtils.lerp(-0.4, -0.85, p) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', THREE.MathUtils.lerp(-0.4, -0.85, p) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', THREE.MathUtils.lerp(-0.72, -0.12, p) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', THREE.MathUtils.lerp(-0.72, -0.12, p) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', THREE.MathUtils.lerp(1.05, 0.16, p) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', THREE.MathUtils.lerp(1.05, 0.16, p) * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'pull') {
+      const tug = Math.sin(t * 3.8);
+      this.applyCharSpacePose('spine', (-0.22 - tug * 0.14) * strength, 0, 0);
+      this.applyCharSpacePose('chest', (-0.12 - tug * 0.08) * strength, 0, 0);
+      this.applyCharSpacePose('leftUpperArm', (-1.05 + tug * 0.24) * strength, 0.15, leftRelax * 0.5, false);
+      this.applyCharSpacePose('rightUpperArm', (-1.05 + tug * 0.24) * strength, -0.15, rightRelax * 0.5, true);
+      this.applyCharSpacePose('leftLowerArm', (-0.82 - tug * 0.26) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', (-0.82 - tug * 0.26) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', -0.45 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.26 * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', 0.55 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', 0.32 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'push') {
+      const shove = Math.sin(t * 4.4);
+      this.applyCharSpacePose('spine', (0.34 + shove * 0.06) * strength, 0, 0);
+      this.applyCharSpacePose('chest', (0.18 + shove * 0.04) * strength, 0, 0);
+      this.applyCharSpacePose('head', -0.22 * headMult, 0, 0);
+      this.applyCharSpacePose('leftUpperArm', (-1.42 - shove * 0.14) * strength, 0, leftRelax * 0.4, false);
+      this.applyCharSpacePose('rightUpperArm', (-1.42 - shove * 0.14) * strength, 0, rightRelax * 0.4, true);
+      this.applyCharSpacePose('leftLowerArm', -0.24 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', -0.24 * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', (-0.32 + shove * 0.28) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', (0.38 - shove * 0.28) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', 0.42 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', 0.28 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'dig') {
+      const cyc = (t * 1.15) % 1;
+      const scoop = Math.sin(cyc * Math.PI * 2);
+      this.applyCharSpacePose('spine', (0.28 + scoop * 0.26) * strength, scoop * 0.15, 0);
+      this.applyCharSpacePose('chest', (0.16 + scoop * 0.14) * strength, scoop * 0.12, 0);
+      this.applyCharSpacePose('head', (0.18 + scoop * 0.12) * headMult, 0, 0);
+      this.applyCharSpacePose('rightUpperArm', (-0.85 + scoop * 0.45) * strength, 0.24, rightRelax * 0.55, true);
+      this.applyCharSpacePose('leftUpperArm', (-1.05 + scoop * 0.35) * strength, -0.24, leftRelax * 0.55, false);
+      this.applyCharSpacePose('rightLowerArm', (-0.65 - scoop * 0.2) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerArm', (-0.52 - scoop * 0.2) * strength, 0, 0, false);
+      this.applyCharSpacePose('leftUpperLeg', -0.34 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.24 * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', 0.46 * strength, 0, 0, false);
+      this.smoothLiveBoneQuaternions(clampedDt, 18);
+      return;
+    }
+
+    if (slot === 'stab') {
+      const p = (this.slotElapsed % 0.62) / 0.62;
+      const thrust = p < 0.28 ? -p / 0.28 : p < 0.6 ? (p - 0.28) / 0.32 : 1 - (p - 0.6) / 0.4;
+      this.applyCharSpacePose('spine', 0.16 * thrust * strength, -0.32 * thrust * strength, 0);
+      this.applyCharSpacePose('chest', 0.12 * thrust * strength, -0.22 * thrust * strength, 0);
+      this.applyCharSpacePose('rightUpperArm', (-0.5 - thrust * 1.05) * strength, 0.1 * thrust, rightRelax * 0.45, true);
+      this.applyCharSpacePose('rightLowerArm', (-0.95 + thrust * 0.85) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', -0.45 * strength, 0, leftRelax * 0.75, false);
+      this.applyCharSpacePose('leftUpperLeg', (-0.22 - thrust * 0.34) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', (0.22 + thrust * 0.32) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftLowerLeg', (0.3 + Math.max(0, thrust) * 0.42) * strength, 0, 0, false);
+      this.smoothLiveBoneQuaternions(clampedDt, 24);
+      return;
+    }
+
+    if (slot === 'bowPull') {
+      const draw = 0.75 + Math.sin(t * 2.2) * 0.25;
+      this.applyCharSpacePose('spine', 0.04 * strength, -0.42 * strength, 0);
+      this.applyCharSpacePose('chest', 0.03 * strength, -0.28 * strength, 0);
+      this.applyCharSpacePose('head', -0.04 * headMult, 0.56 * headMult, 0);
+      this.applyCharSpacePose('leftUpperArm', -1.48 * strength, 0.55, leftRelax * 0.25, false);
+      this.applyCharSpacePose('leftLowerArm', -0.12 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperArm', -1.18 * strength, -0.42 * draw, rightRelax * 0.35 - 0.45, true);
+      this.applyCharSpacePose('rightLowerArm', (-1.15 - 0.48 * draw) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', -0.22 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.22 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 18);
+      return;
+    }
+
+    if (slot === 'hug') {
+      const squeeze = 0.5 + 0.5 * Math.sin(t * 2.8);
+      this.applyCharSpacePose('spine', (0.16 + squeeze * 0.08) * strength, 0, 0);
+      this.applyCharSpacePose('chest', (0.1 + squeeze * 0.05) * strength, 0, 0);
+      this.applyCharSpacePose('head', 0.08 * headMult, 0.16 * headMult, 0.14 * headMult);
+      this.applyCharSpacePose('leftUpperArm', (-1.18 - squeeze * 0.16) * strength, 0.45 + squeeze * 0.32, leftRelax * 0.45, false);
+      this.applyCharSpacePose('rightUpperArm', (-1.18 - squeeze * 0.16) * strength, -0.45 - squeeze * 0.32, rightRelax * 0.45, true);
+      this.applyCharSpacePose('leftLowerArm', (-0.88 - squeeze * 0.34) * strength, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', (-0.88 - squeeze * 0.34) * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 16);
+      return;
+    }
+
+    if (slot === 'punch') {
+      const p = (this.slotElapsed % 0.68) / 0.68;
+      let yaw = -0.35;
+      let ext = 0;
+      if (p < 0.25) {
+        const w = p / 0.25;
+        yaw = -0.42 * w;
+        ext = -0.25 * w;
+      } else if (p < 0.58) {
+        const s = (p - 0.25) / 0.33;
+        const ease = 1 - Math.pow(1 - s, 3);
+        yaw = THREE.MathUtils.lerp(-0.42, 0.62, ease);
+        ext = ease;
+      } else {
+        const r = (p - 0.58) / 0.42;
+        yaw = THREE.MathUtils.lerp(0.62, 0, r);
+        ext = 1 - r;
+      }
+      this.applyCharSpacePose('spine', 0.14 * ext * strength, yaw * 0.6 * strength, 0);
+      this.applyCharSpacePose('chest', 0.08 * ext * strength, yaw * 0.45 * strength, 0);
+      this.applyCharSpacePose('head', 0, -yaw * 0.55 * headMult, 0);
+      this.applyCharSpacePose('rightUpperArm', (-0.42 - Math.max(0, ext) * 1.15) * strength, 0.18 * ext, rightRelax * 0.45, true);
+      this.applyCharSpacePose('rightLowerArm', THREE.MathUtils.lerp(-1.42, -0.1, Math.max(0, ext)) * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperArm', -0.92 * strength, 0.25, leftRelax * 0.65, false);
+      this.applyCharSpacePose('leftLowerArm', -1.25 * strength, 0, 0, false);
+      this.applyCharSpacePose('leftUpperLeg', -0.26 * strength, 0, 0, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.26 * strength, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 26);
+      return;
+    }
+
+    if (slot === 'kick') {
+      const p = (this.slotElapsed % 0.78) / 0.78;
+      let lift = 0;
+      let kneeBend = 0;
+      if (p < 0.28) {
+        const w = p / 0.28;
+        lift = 0.55 * w;
+        kneeBend = 1.45 * w;
+      } else if (p < 0.6) {
+        const s = (p - 0.28) / 0.32;
+        const ease = 1 - Math.pow(1 - s, 3);
+        lift = THREE.MathUtils.lerp(0.55, 1.52, ease);
+        kneeBend = THREE.MathUtils.lerp(1.45, 0.12, ease);
+      } else {
+        const r = (p - 0.6) / 0.4;
+        lift = THREE.MathUtils.lerp(1.52, 0, r);
+        kneeBend = THREE.MathUtils.lerp(0.12, 0.08, r);
+      }
+      this.applyCharSpacePose('spine', -0.22 * (lift / 1.52) * strength, -0.24 * (lift / 1.52) * strength, 0);
+      this.applyCharSpacePose('chest', -0.14 * (lift / 1.52) * strength, 0, 0);
+      this.applyCharSpacePose('leftUpperArm', -0.78 * strength, 0, leftRelax * 1.4, false);
+      this.applyCharSpacePose('rightUpperArm', -0.45 * strength, 0, rightRelax * 1.4, true);
+      this.applyCharSpacePose('rightUpperLeg', -lift * strength, 0, 0, true);
+      this.applyCharSpacePose('rightLowerLeg', kneeBend * strength, 0, 0, true);
+      this.applyCharSpacePose('leftUpperLeg', 0.18 * (lift / 1.52) * strength, 0, 0, false);
+      this.applyCharSpacePose('leftLowerLeg', 0.16 * strength, 0, 0, false);
       this.smoothLiveBoneQuaternions(clampedDt, 24);
       return;
     }

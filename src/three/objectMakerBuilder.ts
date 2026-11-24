@@ -617,6 +617,178 @@ const WEATHERING_TINT: Record<WeatheringPreset, { hex: string; roughnessDelta: n
   rusted: { hex: '#8C4D30', roughnessDelta: 0.12 },
 };
 
+let cachedLogBark: { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture } | null = null;
+let cachedLogRings: { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture } | null = null;
+
+function getLogBarkTextures(): { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture } {
+  if (cachedLogBark) return cachedLogBark;
+  const size = 256;
+  const colorCanvas = document.createElement('canvas');
+  colorCanvas.width = size;
+  colorCanvas.height = size;
+  const ctx = colorCanvas.getContext('2d')!;
+
+  const bumpCanvas = document.createElement('canvas');
+  bumpCanvas.width = size;
+  bumpCanvas.height = size;
+  const bCtx = bumpCanvas.getContext('2d')!;
+
+  ctx.fillStyle = '#5A3A22';
+  ctx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#787878';
+  bCtx.fillRect(0, 0, size, size);
+
+  let seed = 419;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  for (let i = 0; i < 64; i++) {
+    const x = rand() * size;
+    const w = 3 + rand() * 8;
+    const isDark = i % 3 === 0;
+    ctx.strokeStyle = isDark
+      ? `rgba(42, 24, 13, ${0.42 + rand() * 0.35})`
+      : `rgba(128, 92, 58, ${0.28 + rand() * 0.3})`;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    let cx = x;
+    ctx.moveTo(cx, 0);
+    for (let y = 16; y <= size; y += 16) {
+      cx += (rand() - 0.5) * 6;
+      ctx.lineTo(cx, y);
+    }
+    ctx.stroke();
+
+    bCtx.strokeStyle = isDark ? 'rgba(30,30,30,0.65)' : 'rgba(220,220,220,0.45)';
+    bCtx.lineWidth = w * 0.85;
+    bCtx.beginPath();
+    cx = x;
+    bCtx.moveTo(cx, 0);
+    for (let y = 16; y <= size; y += 16) {
+      cx += (rand() - 0.5) * 6;
+      bCtx.lineTo(cx, y);
+    }
+    bCtx.stroke();
+  }
+
+  for (let i = 0; i < 14; i++) {
+    const kx = rand() * size;
+    const ky = rand() * size;
+    const kr = 4 + rand() * 9;
+    ctx.fillStyle = 'rgba(48, 28, 14, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(kx, ky, kr * 0.65, kr * 1.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const map = new THREE.CanvasTexture(colorCanvas);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.needsUpdate = true;
+
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  bumpMap.needsUpdate = true;
+
+  cachedLogBark = { map, bumpMap };
+  return cachedLogBark;
+}
+
+function getLogRingTextures(): { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture } {
+  if (cachedLogRings) return cachedLogRings;
+  const size = 256;
+  const colorCanvas = document.createElement('canvas');
+  colorCanvas.width = size;
+  colorCanvas.height = size;
+  const ctx = colorCanvas.getContext('2d')!;
+
+  const bumpCanvas = document.createElement('canvas');
+  bumpCanvas.width = size;
+  bumpCanvas.height = size;
+  const bCtx = bumpCanvas.getContext('2d')!;
+
+  const cx = size * 0.5 + 6;
+  const cy = size * 0.5 - 4;
+  const maxR = size * 0.49;
+
+  ctx.fillStyle = '#E6D0AC';
+  ctx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#A0A0A0';
+  bCtx.fillRect(0, 0, size, size);
+
+  const img = ctx.getImageData(0, 0, size, size);
+  const bImg = bCtx.getImageData(0, 0, size, size);
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const theta = Math.atan2(dy, dx);
+      const r = Math.hypot(dx, dy);
+      const warp =
+        Math.sin(theta * 3 + r * 0.05) * 4.8 +
+        Math.cos(theta * 5 - r * 0.03) * 2.6 +
+        Math.sin(theta * 9) * 1.2;
+      const rw = r + warp;
+      const idx = (y * size + x) * 4;
+
+      // Outer bark rim
+      if (rw > maxR * 0.9) {
+        img.data[idx] = 88;
+        img.data[idx + 1] = 56;
+        img.data[idx + 2] = 33;
+        img.data[idx + 3] = 255;
+        bImg.data[idx] = bImg.data[idx + 1] = bImg.data[idx + 2] = 75;
+        bImg.data[idx + 3] = 255;
+        continue;
+      }
+
+      // Organic hollow / dark heartwood center
+      if (rw < 21) {
+        const coreMix = Math.max(0, 1 - rw / 21);
+        img.data[idx] = Math.round(92 - coreMix * 44);
+        img.data[idx + 1] = Math.round(62 - coreMix * 32);
+        img.data[idx + 2] = Math.round(38 - coreMix * 20);
+        img.data[idx + 3] = 255;
+        bImg.data[idx] = bImg.data[idx + 1] = bImg.data[idx + 2] = Math.round(45 + (1 - coreMix) * 55);
+        bImg.data[idx + 3] = 255;
+        continue;
+      }
+
+      // Concentric light-beige uneven growth rings + subtle medullary rays
+      const ringWave = Math.sin(rw * 0.54 + Math.sin(theta * 2) * 0.8);
+      const ringDark = ringWave > 0.42 ? (ringWave - 0.42) / 0.58 : 0;
+      const ray = Math.abs(Math.sin(theta * 22 + rw * 0.04)) > 0.94 ? 0.14 : 0;
+      const tone = 1 - ringDark * 0.24 - ray;
+
+      img.data[idx] = Math.min(255, Math.round(234 * tone));
+      img.data[idx + 1] = Math.min(255, Math.round(211 * tone));
+      img.data[idx + 2] = Math.min(255, Math.round(170 * tone));
+      img.data[idx + 3] = 255;
+      const bv = Math.round(165 - ringDark * 65);
+      bImg.data[idx] = bImg.data[idx + 1] = bImg.data[idx + 2] = bv;
+      bImg.data[idx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  bCtx.putImageData(bImg, 0, 0);
+
+  const map = new THREE.CanvasTexture(colorCanvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.needsUpdate = true;
+
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.needsUpdate = true;
+
+  cachedLogRings = { map, bumpMap };
+  return cachedLogRings;
+}
+
 export function createPartMaterial(finish: ObjectSurfaceFinish, isCutter = false): THREE.MeshStandardMaterial {
   if (isCutter) {
     return new THREE.MeshStandardMaterial({
@@ -643,6 +815,22 @@ export function createPartMaterial(finish: ObjectSurfaceFinish, isCutter = false
       roughness: finish.roughness,
       metalness: finish.metalness,
     });
+  }
+
+  if (finish.proceduralSurface === 'logBark') {
+    const tex = getLogBarkTextures();
+    mat.map = tex.map;
+    mat.bumpMap = tex.bumpMap;
+    mat.bumpScale = 0.065;
+    mat.roughness = Math.max(mat.roughness, 0.88);
+    mat.metalness = 0;
+  } else if (finish.proceduralSurface === 'logRings') {
+    const tex = getLogRingTextures();
+    mat.map = tex.map;
+    mat.bumpMap = tex.bumpMap;
+    mat.bumpScale = 0.045;
+    mat.roughness = Math.max(mat.roughness, 0.82);
+    mat.metalness = 0;
   }
 
   const wPreset = finish.weathering ?? 'none';

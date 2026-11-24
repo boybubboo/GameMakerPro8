@@ -74,6 +74,10 @@ import {
   type StageCameraPreset,
 } from '../shared/RigPreviewStage';
 import { SavedPosesSidebar } from '../shared/SavedPosesSidebar';
+import {
+  buildStandardMotionPresetTemplate,
+  STANDARD_MOTION_SLOTS,
+} from '../../data/motionLibrary';
 
 const GIZMO_SIZE_MAP: Record<'M' | 'L' | 'XL', number> = {
   M: 1.05,
@@ -81,15 +85,22 @@ const GIZMO_SIZE_MAP: Record<'M' | 'L' | 'XL', number> = {
   XL: 1.95,
 };
 
-const SLOT_OPTIONS: { slot: CustomClipSlot; label: string; short: string }[] = [
-  { slot: 'idle', label: 'Idle', short: 'Idle' },
-  { slot: 'walk', label: 'Walk', short: 'Walk' },
-  { slot: 'run', label: 'Run', short: 'Run' },
-  { slot: 'jump', label: 'Jump', short: 'Jump' },
-  { slot: 'swim', label: 'Swim', short: 'Swim' },
-  { slot: 'attack', label: 'Attack', short: 'Attack' },
-  { slot: 'interact', label: 'Wave / Interact', short: 'Wave' },
-];
+const SLOT_OPTIONS: { slot: CustomClipSlot; label: string; short: string; group: 'core' | 'object' | 'character' }[] =
+  STANDARD_MOTION_SLOTS.map((s) => ({
+    slot: s.slot,
+    label: s.label,
+    short:
+      s.slot === 'interact'
+        ? 'Wave'
+        : s.slot === 'climbVertical'
+        ? 'Climb V.'
+        : s.slot === 'climbStairs'
+        ? 'Stairs'
+        : s.slot === 'bowPull'
+        ? 'Bow'
+        : s.label.replace(/ \(.*\)$/, ''),
+    group: s.group,
+  }));
 
 function createBlankMotionDraft(slot: CustomClipSlot): CustomMotionPreset {
   const slotTitle = SLOT_OPTIONS.find((s) => s.slot === slot)?.short ?? 'Move';
@@ -747,14 +758,21 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   };
 
   const handleCreateNewDraft = (slot: CustomClipSlot) => {
-    const fresh = createBlankMotionDraft(slot);
+    const boneMap = stageRig?.boneMap ?? effectiveRig?.boneMap ?? {};
+    const fresh =
+      slot === 'walk' || slot === 'run' || slot === 'idle' || slot === 'jump' || slot === 'swim'
+        ? createBlankMotionDraft(slot)
+        : Object.keys(boneMap).length > 0
+        ? buildStandardMotionPresetTemplate(slot, boneMap)
+        : createBlankMotionDraft(slot);
     setStudioMode('pose');
     setIsPlaying(false);
     setDraft(fresh);
     setSavedPresetId(null);
     setPlayhead(0);
-    setWorkingBones({});
-    setWorkingHipsY(0);
+    const startPose = fresh.keyframes[0];
+    setWorkingBones(startPose?.bones ? JSON.parse(JSON.stringify(startPose.bones)) : {});
+    setWorkingHipsY(startPose?.hipsOffsetY ?? 0);
     setIsDirtyPose(false);
   };
 
@@ -1178,11 +1196,27 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
             aria-label="Action slot"
             className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] border border-slate-200/80 dark:border-white/[0.08] text-xs font-semibold"
           >
-            {SLOT_OPTIONS.map((opt) => (
-              <option key={opt.slot} value={opt.slot}>
-                Action: {opt.label}
-              </option>
-            ))}
+            <optgroup label="Core Locomotion">
+              {SLOT_OPTIONS.filter((o) => o.group === 'core').map((opt) => (
+                <option key={opt.slot} value={opt.slot}>
+                  Action: {opt.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Object Interactions">
+              {SLOT_OPTIONS.filter((o) => o.group === 'object').map((opt) => (
+                <option key={opt.slot} value={opt.slot}>
+                  Object: {opt.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Character Interactions">
+              {SLOT_OPTIONS.filter((o) => o.group === 'character').map((opt) => (
+                <option key={opt.slot} value={opt.slot}>
+                  Character: {opt.label}
+                </option>
+              ))}
+            </optgroup>
           </select>
 
           {toast && (
@@ -1785,7 +1819,7 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-4 gap-1">
+                <div className="grid grid-cols-4 gap-1 max-h-48 overflow-y-auto maker-scroll pr-0.5">
                   {SLOT_OPTIONS.map(({ slot, short }) => {
                     const active = draft.slot === slot;
                     const hasSavedGait = Boolean(selectedAsset.rigSettings?.slotTuning?.[slot]);
@@ -1794,7 +1828,7 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                         key={slot}
                         type="button"
                         onClick={() => setDraft((prev) => ({ ...prev, slot }))}
-                        className={`relative px-1.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors truncate ${
+                        className={`relative px-1.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors truncate ${
                           active
                             ? 'bg-[#7C5CFF] text-white'
                             : 'bg-slate-100 dark:bg-[#1F2430] text-slate-700 dark:text-[#C8D0E4] hover:bg-slate-200 dark:hover:bg-[#2A3142]'

@@ -22,6 +22,11 @@ import {
   parseUploadedGlbFile,
   registerGeneratedGlbAsset,
 } from '../three/gltfAssetManager';
+import { buildAndExportObjectDocToGlb } from '../three/objectMakerBuilder';
+import {
+  createFallenLogObjectDoc,
+  FALLBACK_FALLEN_LOG_ASSET_ID,
+} from '../three/fallenLogAsset';
 import { setCustomAssetThumbnailCache } from '../three/assetThumbnailer';
 import {
   collectReferencedTextureIds,
@@ -59,6 +64,8 @@ import type {
   ItemMetadata,
   LevelEntity,
   MakerIssue,
+  ObjectInteractionAttributeId,
+  ObjectInteractionCalibration,
   ObjectMakerDoc,
   ObjectMechanism,
   PlayerTelemetry,
@@ -251,18 +258,39 @@ function migrateProject(proj: GameProject): GameProject {
   });
 
   const baseWidgets = proj.hud?.widgets ?? [];
-  const relocatedWidgets = baseWidgets.map((w) =>
-    w.kind === 'objectiveList' && w.anchor === 'top' && w.offsetX === 0 && w.offsetY === 0
-      ? {
-          ...w,
-          anchor: 'topLeading' as const,
-          offsetX: 0,
-          offsetY: 106,
-          width: Math.max(w.width, 236),
-          height: Math.max(w.height, 76),
-        }
-      : w
+  const hasEnergyBar = baseWidgets.some(
+    (w) => w.kind === 'bar' && w.binding === 'energy'
   );
+  const relocatedWidgets = baseWidgets.map((w) => {
+    if (w.kind === 'objectiveList' && w.anchor === 'top' && w.offsetX === 0 && w.offsetY === 0) {
+      return {
+        ...w,
+        anchor: 'topLeading' as const,
+        offsetX: 0,
+        offsetY: 138,
+        width: Math.max(w.width, 236),
+        height: Math.max(w.height, 76),
+      };
+    }
+    if (
+      !hasEnergyBar &&
+      w.kind === 'objectiveList' &&
+      w.anchor === 'topLeading' &&
+      w.offsetY <= 112
+    ) {
+      return {
+        ...w,
+        offsetY: 138,
+      };
+    }
+    return w;
+  });
+
+  if (!hasEnergyBar) {
+    relocatedWidgets.push(
+      makeWidget('bar', 'topLeading', 'energy', '#FACC15', 'Energy', 0, 102)
+    );
+  }
 
   const hasControls = relocatedWidgets.some((w) => w.kind === 'joystick' || w.kind === 'actionButton');
   const hud = hasControls
@@ -743,7 +771,37 @@ export function useMakerStore() {
 
   useEffect(() => {
     let active = true;
-    listAssetMetas().then((rows) => {
+    listAssetMetas().then(async (rows) => {
+      if (!active) return;
+      const seedKey = 'maker.seededFallenLog.v1';
+      if (
+        localStorage.getItem(seedKey) !== '1' &&
+        !rows.some((a) => a.id === FALLBACK_FALLEN_LOG_ASSET_ID)
+      ) {
+        try {
+          const logDoc = createFallenLogObjectDoc();
+          const { buffer } = await buildAndExportObjectDocToGlb(logDoc);
+          const { meta, buffer: finalBuf } = await registerGeneratedGlbAsset({
+            forcedId: FALLBACK_FALLEN_LOG_ASSET_ID,
+            name: 'Fallen Log',
+            category: 'scenery',
+            buffer,
+            interactionAttributes: logDoc.interactionAttributes,
+            interactionCalibrations: logDoc.interactionCalibrations,
+            objectRecipe: logDoc,
+            keepMetricScale: true,
+          });
+          await saveAssetRecord(meta, finalBuf);
+          if (meta.thumbnailDataUrl) {
+            setCustomAssetThumbnailCache(meta.id, meta.thumbnailDataUrl);
+          }
+          localStorage.setItem(seedKey, '1');
+          if (active) setCustomAssets([meta, ...rows]);
+          return;
+        } catch {
+          // Non-fatal if GLB export fails during headless tests
+        }
+      }
       if (active) setCustomAssets(rows);
     });
     listTextureMetas().then((rows) => {
@@ -783,6 +841,10 @@ export function useMakerStore() {
       category: AssetCategory;
       buffer: ArrayBuffer;
       mechanisms?: ObjectMechanism[];
+      interactionAttributes?: ObjectInteractionAttributeId[];
+      interactionCalibrations?: Partial<
+        Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>
+      >;
       objectRecipe?: ObjectMakerDoc;
       characterRecipe?: CharacterMakerDoc;
       treeRecipe?: StylizedCanopyConfig;
@@ -800,6 +862,8 @@ export function useMakerStore() {
         category: opts.category,
         buffer: opts.buffer,
         mechanisms: opts.mechanisms,
+        interactionAttributes: opts.interactionAttributes,
+        interactionCalibrations: opts.interactionCalibrations,
         objectRecipe: opts.objectRecipe,
         characterRecipe: opts.characterRecipe,
         treeRecipe: opts.treeRecipe,
@@ -1924,6 +1988,14 @@ export function useMakerStore() {
         extraProps.pickupItemId = meta.defaultPickupItemId;
       }
       if (meta?.defaultLoot) extraProps.loot = meta.defaultLoot;
+      if (meta?.interactionAttributes?.length) {
+        extraProps.interactionAttributes = [...meta.interactionAttributes];
+      }
+      if (meta?.interactionCalibrations) {
+        extraProps.interactionCalibrations = JSON.parse(
+          JSON.stringify(meta.interactionCalibrations)
+        ) as Partial<Record<ObjectInteractionAttributeId, ObjectInteractionCalibration>>;
+      }
       const entity = createEntity(
         resolvedKind,
         name ?? meta?.name ?? resolvedKind.charAt(0).toUpperCase() + resolvedKind.slice(1),
