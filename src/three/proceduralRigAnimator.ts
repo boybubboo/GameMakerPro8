@@ -82,7 +82,8 @@ export type RigTestOverride =
   | { kind: 'role'; role: RigBoneRole }
   | { kind: 'manualBone'; boneName: string; rxDeg: number; ryDeg: number; rzDeg: number }
   | { kind: 'poseSnapshot'; bones: Record<string, BonePoseAngles>; hipsOffsetY?: number }
-  | { kind: 'presetPreview'; preset: CustomMotionPreset; timeNorm: number; playing: boolean };
+  | { kind: 'presetPreview'; preset: CustomMotionPreset; timeNorm: number; playing: boolean }
+  | { kind: 'glide'; sway?: number; steerBank?: number };
 
 // Reusable scratch math objects (zero allocations inside per-frame animation update)
 const _qDeltaChar = new THREE.Quaternion();
@@ -1600,6 +1601,43 @@ export class ProceduralRigController {
       } else {
         this.applyCharSpacePose(role, w * 0.22, Math.cos(this.elapsed * 3.2) * 0.28, w * 0.12);
       }
+      return;
+    }
+
+    // 2b. Parachute Blanket Aerial Glide Pose (both arms reaching high overhead gripping corners)
+    if (this.testOverride && this.testOverride.kind === 'glide') {
+      const sway = this.testOverride.sway ?? 0;
+      const bank = this.testOverride.steerBank ?? 0;
+      const hover = Math.sin(this.elapsed * 3.4);
+      this.applyCharSpacePose('hips', 0.08, 0, bank * 0.45);
+      this.applyCharSpacePose('spine', 0.14 * strength, 0, bank * 0.3);
+      this.applyCharSpacePose('chest', 0.1 * strength, 0, bank * 0.2);
+      this.applyCharSpacePose('head', -0.22 * headMult, -bank * 0.35 * headMult, 0);
+
+      // Reach both arms high above head and angled out to hold the two sail corners
+      this.applyCharSpacePose(
+        'leftUpperArm',
+        -2.55 + hover * 0.04,
+        0,
+        leftRelax * 0.25 + 0.52,
+        false
+      );
+      this.applyCharSpacePose(
+        'rightUpperArm',
+        -2.55 - hover * 0.04,
+        0,
+        rightRelax * 0.25 - 0.52,
+        true
+      );
+      this.applyCharSpacePose('leftLowerArm', -0.24, 0, 0, false);
+      this.applyCharSpacePose('rightLowerArm', -0.24, 0, 0, true);
+
+      // Legs trail relaxed beneath the sail with gentle breeze sway
+      this.applyCharSpacePose('leftUpperLeg', 0.22 + sway * 0.16, 0, -0.06, false);
+      this.applyCharSpacePose('rightUpperLeg', 0.3 - sway * 0.16, 0, 0.06, true);
+      this.applyCharSpacePose('leftLowerLeg', 0.38, 0, 0, false);
+      this.applyCharSpacePose('rightLowerLeg', 0.48, 0, 0, true);
+      this.smoothLiveBoneQuaternions(clampedDt, 14);
       return;
     }
 

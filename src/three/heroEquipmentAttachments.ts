@@ -4,6 +4,8 @@ import type { CustomModelInstance } from './gltfAssetManager';
 import { applyBotwStyleToObject } from './botwStyleUtils';
 
 export interface HeroEquipmentHandles {
+  handGripL?: THREE.Object3D;
+  handGripR?: THREE.Object3D;
   sword?: THREE.Group;
   axe?: THREE.Group;
   fishingPole?: THREE.Group;
@@ -1023,6 +1025,36 @@ export function attachEquipmentToCustomModel(
   );
   const held = buildHeldItemsInAnchor(handAnchor, heroScale);
 
+  // Left-Hand Grip Anchor (used for two-handed Parachute Blanket corner grip)
+  const leftHandTargetBone = bones.leftHand ?? bones.leftLowerArm ?? heroCustom.scaledRoot;
+  const hasDedicatedLeftHandBone = Boolean(
+    bones.leftHand && bones.leftHand !== bones.leftLowerArm
+  );
+  const leftGripPos = new THREE.Vector3();
+  if (bones.leftHand) {
+    bones.leftHand.getWorldPosition(leftGripPos);
+    if (hasDedicatedLeftHandBone && bones.leftLowerArm && bones.leftLowerArm !== bones.leftHand) {
+      bones.leftLowerArm.getWorldPosition(_v2);
+      const dir = leftGripPos.clone().sub(_v2);
+      if (dir.lengthSq() > 1e-5) {
+        dir.normalize();
+        leftGripPos.addScaledVector(dir, 0.045 * heroScale);
+      }
+    }
+  } else {
+    leftGripPos.set(
+      charCenter.x + Math.max(0.28 * heroScale, charSize.x * 0.34),
+      gripPos.y,
+      gripPos.z
+    );
+  }
+  const leftHandAnchor = mountOnBoneInHolderSpace(
+    leftHandTargetBone,
+    leftGripPos,
+    _identityQuat,
+    'HeroEquip_LeftHandAnchor'
+  );
+
   // Match project visual style on all newly constructed equipment meshes
   applyBotwStyleToObject(headAnchor, visualStyle);
   applyBotwStyleToObject(cloakAnchor, visualStyle);
@@ -1036,6 +1068,8 @@ export function attachEquipmentToCustomModel(
   heroCustom.group.updateMatrixWorld(true);
 
   return {
+    handGripL: leftHandAnchor,
+    handGripR: handAnchor,
     sword: held.sword,
     axe: held.axe,
     fishingPole: held.fishingPole,
@@ -1080,17 +1114,27 @@ export function syncHeroEquipmentVisuals(
     isSwimming: boolean;
     isAttacking: boolean;
     isFishingActive: boolean;
+    isGliding?: boolean;
   }
 ): void {
-  const { heldDef, headDef, bodyDef, accDef, isSwimming, isAttacking, isFishingActive } = opts;
+  const {
+    heldDef,
+    headDef,
+    bodyDef,
+    accDef,
+    isSwimming,
+    isAttacking,
+    isFishingActive,
+    isGliding,
+  } = opts;
   const heldTool = heldDef?.toolKind ?? null;
-  const showHandProp = !isSwimming || isAttacking;
+  const showHandProp = !isGliding && (!isSwimming || isAttacking);
 
   if (handles.sword) handles.sword.visible = showHandProp && heldTool === 'sword';
   if (handles.axe) handles.axe.visible = showHandProp && heldTool === 'axe';
   if (handles.fishingPole) {
     handles.fishingPole.visible =
-      (showHandProp || isFishingActive) && heldTool === 'fishingPole';
+      !isGliding && (showHandProp || isFishingActive) && heldTool === 'fishingPole';
   }
   if (handles.torch) {
     const torchOn = showHandProp && heldTool === 'torch';
@@ -1107,7 +1151,7 @@ export function syncHeroEquipmentVisuals(
   }
   if (handles.shield) {
     handles.shield.visible =
-      !isSwimming && heldTool !== 'axe' && heldTool !== 'fishingPole';
+      !isGliding && !isSwimming && heldTool !== 'axe' && heldTool !== 'fishingPole';
   }
 
   const isCrownItem = Boolean(

@@ -256,6 +256,38 @@ export const ItemThumbnailArt: React.FC<ItemThumbnailArtProps> = ({
           <path d="M32 12V52" stroke="#FFFFFF" strokeOpacity="0.35" strokeWidth="1.2" />
         </g>
       )}
+
+      {meshKind === 'blanket' && (
+        <g>
+          {/* Cupped wind-filled sail blanket */}
+          <path
+            d="M11 35C14 17 24 12 32 12C40 12 50 17 53 35C46 29 39 27 32 27C25 27 18 29 11 35Z"
+            fill={colorHex}
+            stroke="#F7E8CF"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          {/* Woven sail stripe & underside shadow curve */}
+          <path
+            d="M17 31C21 20 27 17 32 17C37 17 43 20 47 31"
+            stroke="#FDE68A"
+            strokeOpacity="0.82"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <path
+            d="M11 35C19 30 45 30 53 35C44 39 20 39 11 35Z"
+            fill="#0F172A"
+            fillOpacity="0.28"
+          />
+          {/* Reinforced corner grips & cords held overhead */}
+          <path d="M12 35L21 51" stroke="#E2E8F0" strokeOpacity="0.75" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M52 35L43 51" stroke="#E2E8F0" strokeOpacity="0.75" strokeWidth="1.5" strokeLinecap="round" />
+          <circle cx="12" cy="35" r="2.6" fill="#92400E" stroke="#F7E8CF" strokeWidth="1" />
+          <circle cx="52" cy="35" r="2.6" fill="#92400E" stroke="#F7E8CF" strokeWidth="1" />
+        </g>
+      )}
     </svg>
   );
 };

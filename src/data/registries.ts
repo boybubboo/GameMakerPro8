@@ -1123,6 +1123,28 @@ export const DefaultInventoryItems: InventoryItemDef[] = [
     },
   },
   {
+    id: 'parachute_blanket',
+    name: 'Parachute Blanket',
+    category: 'tool',
+    colorHex: '#E06D44',
+    icon: 'blanket',
+    description:
+      'A lightweight wind-sail blanket packed in your backpack. Jump off a cliff or mountain and hold Use (E / Alt) to grip two corners overhead and glide gently down.',
+    lore: 'Tightly woven traveler blanket stitched with reinforced corner loops that catch mountain updrafts.',
+    magicEffect: 'Automatically deploys overhead when airborne above high drops; release Use or land to fold back into your bag.',
+    meshKind: 'blanket',
+    metadata: {
+      power: 14,
+      durability: 100,
+      maxDurability: 100,
+      magic_effect: 'Catches mountain wind in a cupped sail curve for gentle gliding flight.',
+      rarity: 'uncommon',
+      weight: 0.6,
+      repairable: false,
+      properties: { activation: 'Jump & Hold Use', stow: 'Release or Touch Ground' },
+    },
+  },
+  {
     id: 'timber_club',
     name: 'Heavy Timber Club',
     category: 'weapon',

@@ -177,11 +177,14 @@ import {
   buildFallingTreeMesh,
   buildHeroModel,
   buildLeapingFishMesh,
+  buildParachuteBlanketRig,
   buildPickupItemMesh,
   buildPortalMarker,
   buildTreeStumpMesh,
+  updateParachuteBlanketRig,
   type BaddieRig,
   type CreatureAnimRefs,
+  type ParachuteBlanketRig,
 } from '../../three/proceduralModels';
 import {
   attachEquipmentToCustomModel,
@@ -557,9 +560,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     label: string;
     active: boolean;
   } | null>(null);
+  const [glidePrompt, setGlidePrompt] = useState<'ready' | 'readySecond' | 'gliding' | null>(null);
   const [fishingBanner, setFishingBanner] = useState<'none' | 'waiting' | 'bite'>('none');
   const [inventoryStacks, setInventoryStacks] = useState<InventoryStack[]>([
     { itemId: 'iron_sword', qty: 1, durability: 100, maxDurability: 100 },
+    { itemId: 'parachute_blanket', qty: 1, durability: 100, maxDurability: 100 },
   ]);
   const [equipment, setEquipment] = useState<HeroEquipment>({
     heldItemId: 'iron_sword',
@@ -1332,6 +1337,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     joyX: 0,
     joyY: 0,
     jumpQueued: false,
+    jumpPointerDown: false,
+    jumpPressQueuedCount: 0,
     attackQueued: false,
     interactQueued: false,
     interactPointerDown: false,
@@ -1586,19 +1593,22 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       }
 
       if (
-        e.code === 'Space' ||
-        ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat)
+        (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') &&
+        !e.repeat
       ) {
         e.preventDefault();
-        if (vultureLookoutActiveRef.current && !e.repeat) {
+        if (vultureLookoutActiveRef.current) {
           inputRef.current.vultureExitQueued = true;
           return;
         }
-        if (cutawayHeroLockRef.current && !e.repeat) {
+        if (cutawayHeroLockRef.current) {
           skipCutawaySignalRef.current = true;
           return;
         }
         inputRef.current.jumpQueued = true;
+        inputRef.current.jumpPressQueuedCount += 1;
+      } else if (e.code === 'Space') {
+        e.preventDefault();
       } else if (
         envType === 'sideScroller' &&
         (e.code === 'KeyW' || e.code === 'ArrowUp') &&
@@ -1606,6 +1616,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       ) {
         e.preventDefault();
         inputRef.current.jumpQueued = true;
+        inputRef.current.jumpPressQueuedCount += 1;
       } else if (
         e.code === 'ArrowUp' ||
         e.code === 'ArrowDown' ||
@@ -1709,6 +1720,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     const onWindowBlur = () => {
       inputRef.current.keys.clear();
       inputRef.current.interactPointerDown = false;
+      inputRef.current.jumpPointerDown = false;
+      inputRef.current.jumpPressQueuedCount = 0;
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -2170,6 +2183,16 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         applyVisualStyleToObject(heroRig.group, style);
         heroRoot = heroRig.group;
       }
+
+      const blanketDef = itemByIdRef.current.get('parachute_blanket');
+      const parachuteRig: ParachuteBlanketRig = buildParachuteBlanketRig(
+        blanketDef?.colorHex ?? '#E06D44'
+      );
+      applyVisualStyleToObject(parachuteRig.group, style);
+      heroRoot.add(parachuteRig.group);
+      const parachuteCanopyScale = heroCustom
+        ? Math.max(0.45, activeProject.heroModelScale ?? 1)
+        : 1;
 
       const isDriving = activeLevel.gameplayMode === 'driving';
       const isBuddies =
@@ -3515,8 +3538,18 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let lastDoorPromptKey = '';
       let lastSitPromptKey = '';
       let lastClimbPromptKey = '';
+      let lastGlidePromptKey: 'ready' | 'readySecond' | 'gliding' | '' = '';
       let lastNearCraftingBench = false;
       let armorBlockCounter = 0;
+
+      let isGliding = false;
+      let airJumpPresses = 0;
+      let secondJumpHoldTime = 0;
+      let glideDeployBlend = 0;
+      let glideBankRoll = 0;
+      let wasGlidingCustom = false;
+      const _glideHandL = new THREE.Vector3();
+      const _glideHandR = new THREE.Vector3();
 
       let isSitting = false;
       let sitTargetX = 0;
@@ -3627,6 +3660,12 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         const inp = inputRef.current;
         const pausedNow = flagsRef.current.pausedByScreen;
         const camModeNow = resolvedCamModeRef.current;
+
+        if (pausedNow) {
+          inp.jumpPointerDown = false;
+          inp.jumpPressQueuedCount = 0;
+          inp.interactPointerDown = false;
+        }
 
         if (!pausedNow) {
           // Brief crisp micro-hitstop freezes combat motion for a tactile melee impact punch
@@ -4102,10 +4141,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const energySpeedMult = energy <= 0 ? 0.78 : 1;
           const wantsRun =
             (joyMag > 0.85 ||
-              (useHeld && !hasNearbyInteractablePrev && effectiveMoveMag > 0.08)) &&
+              (useHeld && !isGliding && !hasNearbyInteractablePrev && effectiveMoveMag > 0.08)) &&
             enabledSet.has('run') &&
             !isSitting &&
             !isClimbing &&
+            !isGliding &&
             energy > 0.5;
           isRunning = wantsRun && !staminaExhausted && stamina > 0.5 && effectiveMoveMag > 0.08;
           const moveSpeed =
@@ -4290,8 +4330,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
             if (inp.jumpQueued) {
               inp.jumpQueued = false;
+              inp.jumpPressQueuedCount = 0;
               isClimbing = false;
-              heroVelY = 7.8;
+              airJumpPresses = 1;
+              secondJumpHoldTime = 0;
+              heroVelY = 8.8;
               heroKnockVX -= Math.sin(heroYaw) * 2.8;
               heroKnockVZ -= Math.cos(heroYaw) * 2.8;
               AudioEngine.playSound(activeLevel.audio.jump);
@@ -4332,7 +4375,73 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               }
             }
           } else {
-          if (isFirstPersonControl && canWalk) {
+          if (isGliding && canWalk) {
+            collisionCtx.actorY = heroY;
+            let glideTurnInput = 0;
+            let glideAirSpeed = 7.2;
+
+            if (isFirstPersonControl || camModeNow === 'front' || camModeNow === 'heroFront') {
+              if (!draggingCam && camModeNow !== 'firstPerson') {
+                const wrappedOffset = Math.atan2(
+                  Math.sin(inp.lookYawOffset),
+                  Math.cos(inp.lookYawOffset)
+                );
+                inp.lookYawOffset = THREE.MathUtils.damp(wrappedOffset, 0, 7.5, dt);
+                inp.lookPitchOffset = THREE.MathUtils.damp(inp.lookPitchOffset, 0, 6.5, dt);
+              }
+              const steerX = THREE.MathUtils.clamp(moveX, -1, 1);
+              if (camModeNow === 'firstPerson') {
+                if (Math.abs(steerX) > 0.05) {
+                  inp.cameraYaw -= steerX * 1.95 * dt;
+                }
+                heroYaw = Math.atan2(-Math.sin(inp.cameraYaw), -Math.cos(inp.cameraYaw));
+                glideTurnInput = -steerX;
+              } else if (camModeNow === 'heroFront') {
+                heroYaw += steerX * 2.0 * dt;
+                glideTurnInput = steerX;
+              } else {
+                heroYaw -= steerX * 2.0 * dt;
+                glideTurnInput = -steerX;
+              }
+              if (moveZ > 0.25) {
+                // Pulling back flares the sail for a gentle, precise landing
+                glideAirSpeed = THREE.MathUtils.lerp(7.2, 2.6, Math.min(1, moveZ));
+              } else if (moveZ < -0.15) {
+                glideAirSpeed = THREE.MathUtils.lerp(7.2, 10.2, Math.min(1, -moveZ));
+              }
+            } else if (mag > 0.08) {
+              const nx = moveX / Math.max(1, mag);
+              const nz = moveZ / Math.max(1, mag);
+              const activeYaw = camModeNow === 'sideScroll' ? 0 : inp.cameraYaw;
+              const sinY = Math.sin(activeYaw);
+              const cosY = Math.cos(activeYaw);
+              const wishDX = nx * cosY + nz * sinY;
+              const wishDZ = env === 'sideScroller' ? nz * 0.35 : -nx * sinY + nz * cosY;
+              const wishYaw = Math.atan2(wishDX, wishDZ);
+              const yawDiff = Math.atan2(Math.sin(wishYaw - heroYaw), Math.cos(wishYaw - heroYaw));
+              const maxTurn = 4.2 * dt;
+              const stepYaw = THREE.MathUtils.clamp(yawDiff, -maxTurn, maxTurn);
+              heroYaw += stepYaw;
+              glideTurnInput = THREE.MathUtils.clamp(yawDiff, -1, 1);
+              glideAirSpeed = THREE.MathUtils.lerp(7.2, 10.2, Math.min(1, mag));
+            }
+
+            glideBankRoll = THREE.MathUtils.damp(glideBankRoll, glideTurnInput * 0.28, 7.5, dt);
+            const glideDX = Math.sin(heroYaw);
+            const glideDZ = Math.cos(heroYaw);
+            const [resolvedX, resolvedZ] = resolveHorizontalCollision(
+              activeLevel,
+              heroX + glideDX * glideAirSpeed * heroSpeedMult * dt,
+              heroZ + glideDZ * glideAirSpeed * heroSpeedMult * dt,
+              0.62,
+              canSwim,
+              collisionCtx
+            );
+            heroX = resolvedX;
+            heroZ = resolvedZ;
+            stamina = Math.min(100, stamina + dt * 14 * staminaRegenMult);
+          } else if (isFirstPersonControl && canWalk) {
+            glideBankRoll = THREE.MathUtils.damp(glideBankRoll, 0, 10, dt);
             collisionCtx.actorY = heroY;
             // In Character POV: A/D & Left/Right rotate the character left/right (even when standing still);
             // W/S & Up/Down walk forward and backward along the facing direction.
@@ -4388,6 +4497,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               stamina = Math.min(100, stamina + dt * 26 * staminaRegenMult);
             }
           } else if (mag > 0.08 && canWalk) {
+            glideBankRoll = THREE.MathUtils.damp(glideBankRoll, 0, 10, dt);
             collisionCtx.actorY = heroY;
             const nx = moveX / Math.max(1, mag);
             const nz = moveZ / Math.max(1, mag);
@@ -4473,6 +4583,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               AudioEngine.playSound(activeLevel.audio.step);
             }
           } else {
+            glideBankRoll = THREE.MathUtils.damp(glideBankRoll, 0, 10, dt);
             stamina = Math.min(100, stamina + dt * 26 * staminaRegenMult);
           }
 
@@ -4596,11 +4707,34 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
           // Coyote time & jump buffering so jumping while running/swimming NEVER drops an input
           const grounded = !isSwimming && heroVelY <= 0.25 && heroY <= floorY + 0.14;
+          const jumpHeld =
+            inp.keys.has('Space') ||
+            inp.keys.has('ShiftLeft') ||
+            inp.keys.has('ShiftRight') ||
+            (env === 'sideScroller' && (inp.keys.has('KeyW') || inp.keys.has('ArrowUp'))) ||
+            inp.jumpPointerDown;
+          const freshJumpPresses = inp.jumpPressQueuedCount;
+          inp.jumpPressQueuedCount = 0;
+
           if (grounded || isSwimming) {
             coyoteTimer = 0.14;
             jumpsUsed = 0;
+            airJumpPresses = 0;
+            secondJumpHoldTime = 0;
           } else {
             coyoteTimer = Math.max(0, coyoteTimer - dt);
+          }
+
+          if (freshJumpPresses > 0) {
+            airJumpPresses += freshJumpPresses;
+            if (airJumpPresses >= 2 && jumpHeld) {
+              secondJumpHoldTime = Math.max(secondJumpHoldTime, 0.001);
+            }
+          }
+          if (jumpHeld && airJumpPresses >= 2) {
+            secondJumpHoldTime += dt;
+          } else {
+            secondJumpHoldTime = 0;
           }
 
           if (inp.jumpQueued) {
@@ -4615,29 +4749,65 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             if (isSwimming) {
               isSwimming = false;
               swimReenterCooldown = 0.36;
-              heroVelY = 8.4;
+              heroVelY = 9.6;
               jumpsUsed = 1;
+              airJumpPresses = Math.max(1, airJumpPresses);
               coyoteTimer = 0;
               jumpBufferTimer = 0;
               AudioEngine.playSound(activeLevel.audio.jump);
               AudioEngine.playSound('splash');
             } else if (coyoteTimer > 0) {
-              heroVelY = 9.2;
+              heroVelY = 10.6;
               jumpsUsed = 1;
+              airJumpPresses = Math.max(1, airJumpPresses);
               coyoteTimer = 0;
               jumpBufferTimer = 0;
               AudioEngine.playSound(activeLevel.audio.jump);
             } else if (jumpsUsed < maxJumps) {
-              heroVelY = 8.6;
+              heroVelY = 10.0;
               jumpsUsed++;
+              airJumpPresses = Math.max(2, airJumpPresses);
               jumpBufferTimer = 0;
               AudioEngine.playSound(activeLevel.audio.jump);
             }
           }
 
+          const hasParachuteBlanket = inventoryStacksRef.current.some(
+            (s) => s.itemId === 'parachute_blanket' && s.qty > 0
+          );
+          const clearanceBelow =
+            heroY -
+            Math.max(
+              floorY,
+              env === 'openWorld' && waterDepth > 0.35 ? waterSurfaceY : floorY
+            );
+          const readyToOpenOnHold =
+            airJumpPresses >= 2 &&
+            clearanceBelow > 0.35 &&
+            (secondJumpHoldTime >= 0.08 || (heroVelY < -2.2 && secondJumpHoldTime >= 0.02));
+
+          if (!isSitting && !isClimbing && !isSwimming && canWalk && hasParachuteBlanket && jumpHeld) {
+            if (!isGliding && readyToOpenOnHold) {
+              isGliding = true;
+              if (heroVelY < 0) {
+                heroVelY = Math.max(heroVelY * 0.32, -1.1);
+              } else {
+                heroVelY = Math.min(heroVelY, 6.2);
+              }
+              AudioEngine.playSound('whoosh');
+              spawnCombatSparks(heroX, heroY + 1.85, heroZ, '#E8F7FF', 8, 3.6);
+            }
+          } else {
+            isGliding = false;
+          }
+
           const movingNow =
-            (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) && canWalk;
-          const energyDrainRate = isSwimming
+            !isGliding &&
+            (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) &&
+            canWalk;
+          const energyDrainRate = isGliding
+            ? 0.08
+            : isSwimming
             ? 0.32
             : isRunning
             ? 0.48
@@ -4651,9 +4821,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           }
           } // end !isSitting && !isClimbing
 
+          if (isSitting || isClimbing || isSwimming || isDriving) {
+            isGliding = false;
+          }
+
           const moving =
             !isSitting &&
             !isClimbing &&
+            !isGliding &&
             (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) &&
             canWalk;
           const actualHorizSpeed =
@@ -4682,9 +4857,29 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroY = THREE.MathUtils.damp(heroY, targetFloatY, 7.5, dt);
             heroVelY = 0;
             airborneTimer = 0;
+          } else if (isGliding) {
+            if (heroVelY > -0.95) {
+              heroVelY -= 4.8 * dt;
+            } else {
+              const isFlaring =
+                (isFirstPersonControl || camModeNow === 'front' || camModeNow === 'heroFront') &&
+                moveZ > 0.25;
+              const targetSink = -1.15 + Math.sin(gameElapsed * 2.1) * 0.14 + (isFlaring ? 0.25 : 0);
+              heroVelY = THREE.MathUtils.damp(heroVelY, targetSink, 6.2, dt);
+            }
+            heroY += heroVelY * dt;
+            if (heroVelY <= 0 && heroY <= floorY + 0.14) {
+              heroY = floorY;
+              heroVelY = 0;
+              jumpsUsed = 0;
+              airborneTimer = 0;
+              isGliding = false;
+            } else {
+              airborneTimer += dt;
+            }
           } else {
             const wasGroundedOnSlope = jumpsUsed === 0 && heroVelY <= 0.1 && heroY <= floorY + 0.48;
-            heroVelY -= 22 * dt;
+            heroVelY -= 19.5 * dt;
             heroY += heroVelY * dt;
             // Follow mild downhill slopes smoothly while running so character never bounces into false jump glitches!
             if (heroVelY <= 0 && (heroY <= floorY || (wasGroundedOnSlope && heroY <= floorY + 0.42))) {
@@ -4695,6 +4890,39 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             } else {
               airborneTimer += dt;
             }
+          }
+
+          if (isSitting || isClimbing || isSwimming || isDriving) {
+            isGliding = false;
+            airJumpPresses = 0;
+            secondJumpHoldTime = 0;
+          }
+
+          const hasBlanketInBag = inventoryStacksRef.current.some(
+            (s) => s.itemId === 'parachute_blanket' && s.qty > 0
+          );
+          const promptClearance =
+            heroY -
+            Math.max(
+              floorY,
+              env === 'openWorld' && waterDepth > 0.35 ? waterSurfaceY : floorY
+            );
+          const nextGlidePromptKey: 'ready' | 'readySecond' | 'gliding' | '' = isGliding
+            ? 'gliding'
+            : !isSitting &&
+              !isClimbing &&
+              !isSwimming &&
+              !isDriving &&
+              canWalk &&
+              hasBlanketInBag &&
+              promptClearance >= 1.85
+            ? airJumpPresses >= 1
+              ? 'readySecond'
+              : 'ready'
+            : '';
+          if (nextGlidePromptKey !== lastGlidePromptKey) {
+            lastGlidePromptKey = nextGlidePromptKey;
+            setGlidePrompt(nextGlidePromptKey || null);
           }
 
           // Water / Chasm respawn check when swimming is disabled or in sideScroller
@@ -4768,6 +4996,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               isSwimming,
               isAttacking: attackAnimTimer > 0,
               isFishingActive: fishingState.phase !== 'idle',
+              isGliding,
             });
           }
 
@@ -4777,6 +5006,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               !isSitting &&
               !isClimbing &&
               (jumpsUsed > 0 || (airborneTimer > 0.1 && heroY > floorY + 0.45));
+            if (isGliding) {
+              heroCustom.setTestOverride({
+                kind: 'glide',
+                sway: Math.sin(gameElapsed * 2.9),
+                steerBank: glideBankRoll,
+              });
+              wasGlidingCustom = true;
+            } else if (wasGlidingCustom) {
+              heroCustom.setTestOverride(null);
+              wasGlidingCustom = false;
+            }
             if (isSitting) heroCustom.setAction('sit', 0.12);
             else if (isClimbing) heroCustom.setAction('climbVertical', 0.12);
             else if (attackAnimTimer > 0)
@@ -4850,6 +5090,19 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               targetLegLX = -0.58 - reach * 0.44;
               targetLegRX = -0.58 + reach * 0.44;
               targetHeadX = -0.24;
+            } else if (isGliding) {
+              const flutter = Math.sin(gameElapsed * 3.6);
+              targetBodyY = 0.06 + flutter * 0.025;
+              targetBodyRoll = glideBankRoll * 0.65;
+              targetHeadX = -0.22;
+              targetArmLX = -2.62 + flutter * 0.03;
+              targetArmRX = -2.62 - flutter * 0.03;
+              targetArmLZ = 0.58;
+              targetArmRZ = -0.58;
+              targetForearmLX = -0.22;
+              targetForearmRX = -0.22;
+              targetLegLX = 0.24 + Math.sin(gameElapsed * 2.9) * 0.14;
+              targetLegRX = 0.34 - Math.sin(gameElapsed * 2.9) * 0.14;
             } else if (isSwimming) {
               if (attackAnimTimer > 0) {
                 const p = 1 - attackAnimTimer / activeAttackDuration;
@@ -5052,7 +5305,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             }
 
             heroRig.bodyPivot.position.y = dampJoint(heroRig.bodyPivot.position.y, 0.85 + targetBodyY, 14);
-            heroRig.bodyPivot.rotation.x = isSitting ? -0.05 : isClimbing ? -0.1 : swimTiltX;
+            heroRig.bodyPivot.rotation.x = isSitting
+              ? -0.05
+              : isClimbing
+              ? -0.1
+              : isGliding
+              ? 0.14
+              : swimTiltX;
             heroRig.bodyPivot.rotation.y = dampJoint(heroRig.bodyPivot.rotation.y, targetBodyYaw, 18);
             heroRig.bodyPivot.rotation.z = dampJoint(heroRig.bodyPivot.rotation.z, targetBodyRoll, 10);
             heroRig.head.rotation.x = dampJoint(heroRig.head.rotation.x, targetHeadX, 10);
@@ -5081,8 +5340,53 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             );
           }
 
+          glideDeployBlend = THREE.MathUtils.damp(
+            glideDeployBlend,
+            isGliding ? 1 : 0,
+            isGliding ? 13 : 17,
+            dt
+          );
+          if (glideDeployBlend > 0.01) {
+            heroRoot.updateMatrixWorld(true);
+            const gripLObj = heroRig?.handGripL ?? heroCustomEquipment?.handGripL;
+            const gripRObj = heroRig?.handGripR ?? heroCustomEquipment?.handGripR;
+            if (gripLObj && gripRObj) {
+              gripLObj.getWorldPosition(_glideHandL);
+              gripRObj.getWorldPosition(_glideHandR);
+              heroRoot.worldToLocal(_glideHandL);
+              heroRoot.worldToLocal(_glideHandR);
+            } else {
+              _glideHandL.set(
+                0.62 * parachuteCanopyScale,
+                1.98 * parachuteCanopyScale,
+                0.22 * parachuteCanopyScale
+              );
+              _glideHandR.set(
+                -0.62 * parachuteCanopyScale,
+                1.98 * parachuteCanopyScale,
+                0.22 * parachuteCanopyScale
+              );
+            }
+            const airSpeedNorm = THREE.MathUtils.clamp(actualHorizSpeed / 8.0, 0.25, 1.2);
+            updateParachuteBlanketRig(
+              parachuteRig,
+              glideDeployBlend,
+              gameElapsed,
+              airSpeedNorm,
+              _glideHandL,
+              _glideHandR,
+              parachuteCanopyScale
+            );
+          } else {
+            parachuteRig.group.visible = false;
+          }
+
           // Close the on-foot else block & record breadcrumb trail for companions
           }
+          if (isDriving) {
+            parachuteRig.group.visible = false;
+          }
+
           const isFirstPersonNow = !isDriving && camModeNow === 'firstPerson';
           if (heroCustom) {
             heroRoot.visible = !isFirstPersonNow;
@@ -7775,13 +8079,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             setHarvestPrompt(null);
           }
 
-          if (didInteract && !interactConsumed && heldDefNow?.toolKind === 'fishingPole') {
+          if (didInteract && !interactConsumed && !isGliding && heldDefNow?.toolKind === 'fishingPole') {
             triggerFishingAction();
           }
 
           // Proximity check for 3D Crafting Bench in the world
           let isNearBenchNow = false;
-          if (!isDriving && craftingBenchEntities.length > 0) {
+          if (!isDriving && !isGliding && craftingBenchEntities.length > 0) {
             for (const benchRt of craftingBenchEntities) {
               if (!benchRt.alive) continue;
               const d = Math.hypot(benchRt.x - heroX, benchRt.z - heroZ);
@@ -8898,6 +9202,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       setDoorInteractPrompt(null);
       setSitPrompt(null);
       setClimbPrompt(null);
+      setGlidePrompt(null);
       liveQualityTargetRef.current = null;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
@@ -9056,7 +9361,10 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     });
     setStoryStats({ puzzlesSolved: 0, crittersWarmed: 0 });
     store.resetRuntimeDurability();
-    setInventoryStacks([{ itemId: 'iron_sword', qty: 1, durability: 100, maxDurability: 100 }]);
+    setInventoryStacks([
+      { itemId: 'iron_sword', qty: 1, durability: 100, maxDurability: 100 },
+      { itemId: 'parachute_blanket', qty: 1, durability: 100, maxDurability: 100 },
+    ]);
     setEquipment({
       heldItemId: 'iron_sword',
       headItemId: null,
@@ -9127,10 +9435,22 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     e.stopPropagation();
     e.preventDefault();
     if (action === 'jump') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore if pointer capture isn't supported
+      }
       inputRef.current.jumpQueued = true;
+      inputRef.current.jumpPointerDown = true;
+      inputRef.current.jumpPressQueuedCount += 1;
     } else if (action === 'attack') {
       inputRef.current.attackQueued = true;
     } else if (action === 'interact') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore if pointer capture isn't supported
+      }
       inputRef.current.interactQueued = true;
       inputRef.current.interactPointerDown = true;
     } else if (action === 'magicBolt') {
@@ -9145,7 +9465,23 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     e: React.PointerEvent<HTMLButtonElement>
   ) => {
     e.stopPropagation();
-    if (action === 'interact') {
+    if (action === 'jump') {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // Ignore if pointer capture isn't supported
+      }
+      inputRef.current.jumpPointerDown = false;
+    } else if (action === 'interact') {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // Ignore if pointer capture isn't supported
+      }
       inputRef.current.interactPointerDown = false;
     }
   };
@@ -9815,6 +10151,31 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         </div>
       )}
 
+      {/* Parachute Blanket Glide Prompt */}
+      {controlsActive && glidePrompt && !climbPrompt && !sitPrompt && !nearCraftingBench && !doorInteractPrompt && !harvestPrompt && (
+        <div
+          className={`fixed ${
+            unlockedPowers.length > 0 ? 'bottom-32' : 'bottom-24'
+          } left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#11141D]/92 border border-[#E06D44]/60 text-white text-xs font-extrabold shadow-xl z-30 flex items-center gap-2 whitespace-nowrap`}
+        >
+          <span>
+            {glidePrompt === 'gliding' ? (
+              <>
+                <span className="text-[#F4C95D]">Parachute Blanket</span> · Hold <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">Jump</span> to fly · Release to stow
+              </>
+            ) : glidePrompt === 'readySecond' ? (
+              <>
+                Press &amp; hold <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">Jump</span> again to open <span className="text-[#F4C95D]">Parachute Blanket</span>
+              </>
+            ) : (
+              <>
+                Double-press &amp; hold <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">Jump</span> to open <span className="text-[#F4C95D]">Parachute Blanket</span>
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Quick Misfit Powers + Held-Tool Bar + Subtle Control Hint */}
       {controlsActive && !activeBottomSpeech && !isDrivingMode && (
         <div className="fixed bottom-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 z-20">
@@ -10207,7 +10568,22 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                       hydrateDiscoveredPlinths(currentProject.id, saved.discoveredPlinthKeys);
                       setDiscoveredPlinthKeys(getDiscoveredPlinthKeys(currentProject.id));
                       resumeSavedRef.current = saved;
-                      setInventoryStacks(saved.inventoryStacks);
+                      const hasBlanket = saved.inventoryStacks.some(
+                        (s) => s.itemId === 'parachute_blanket'
+                      );
+                      setInventoryStacks(
+                        hasBlanket
+                          ? saved.inventoryStacks
+                          : [
+                              ...saved.inventoryStacks,
+                              {
+                                itemId: 'parachute_blanket',
+                                qty: 1,
+                                durability: 100,
+                                maxDurability: 100,
+                              },
+                            ]
+                      );
                       setEquipment(saved.equipment);
                       if (saved.levelId !== currentLevel.id) {
                         store.setSelectedLevelID(saved.levelId);

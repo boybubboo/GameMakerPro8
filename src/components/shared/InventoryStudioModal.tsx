@@ -61,6 +61,7 @@ const MESH_OPTIONS: { kind: PickupMeshKind; label: string; defaultIcon: string }
   { kind: 'moss', label: 'Glow Moss', defaultIcon: 'sprout' },
   { kind: 'bone', label: 'Bone Relic', defaultIcon: 'bone' },
   { kind: 'gem', label: 'Crystal Gem', defaultIcon: 'gem' },
+  { kind: 'blanket', label: 'Parachute Blanket', defaultIcon: 'blanket' },
 ];
 
 const QUICK_KEYS = [

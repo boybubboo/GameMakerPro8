@@ -19,6 +19,7 @@ import {
   Sword,
   Trees,
   Utensils,
+  Wind,
 } from 'lucide-react';
 
 export const InventoryItemIcon: React.FC<{
@@ -65,6 +66,9 @@ export const InventoryItemIcon: React.FC<{
       return <Shield {...props} />;
     case 'backpack':
       return <Backpack {...props} />;
+    case 'blanket':
+    case 'wind':
+      return <Wind {...props} />;
     default:
       return <Package {...props} />;
   }

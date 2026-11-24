@@ -31,6 +31,8 @@ export interface HeroRig {
   armR: THREE.Group;
   forearmL?: THREE.Group;
   forearmR?: THREE.Group;
+  handGripL?: THREE.Object3D;
+  handGripR?: THREE.Object3D;
   legL: THREE.Group;
   legR: THREE.Group;
   sword?: THREE.Group;
@@ -1156,14 +1158,16 @@ export function buildHeroModel(
       heroBody === 'Robot' ? steelMat : skinMat
     );
     hand.position.y = -0.18;
-    forearm.add(lowerSleeve, hand);
+    const handGrip = new THREE.Object3D();
+    handGrip.position.set(0, -0.18, 0.02);
+    forearm.add(lowerSleeve, hand, handGrip);
     pivot.add(upperSleeve, forearm);
     pivot.userData.forearm = forearm;
     bodyRoot.add(pivot);
-    return { pivot, forearm };
+    return { pivot, forearm, handGrip };
   };
-  const { pivot: armL, forearm: forearmL } = makeArm(0.34);
-  const { pivot: armR, forearm: forearmR } = makeArm(-0.34);
+  const { pivot: armL, forearm: forearmL, handGrip: handGripL } = makeArm(0.34);
+  const { pivot: armR, forearm: forearmR, handGrip: handGripR } = makeArm(-0.34);
 
   // Sword on right forearm
   const sword = new THREE.Group();
@@ -1402,6 +1406,8 @@ export function buildHeroModel(
     armR,
     forearmL,
     forearmR,
+    handGripL,
+    handGripR,
     legL,
     legR,
     sword,
@@ -1712,6 +1718,36 @@ export function buildPickupItemMesh(meshKind: PickupMeshKind, colorHex: string):
       holder.add(roll, seal);
       break;
     }
+    case 'blanket': {
+      const clothMat = new THREE.MeshStandardMaterial({
+        color: colorHex,
+        roughness: 0.86,
+        flatShading: true,
+      });
+      const trimMat = new THREE.MeshStandardMaterial({
+        color: '#F7E8CF',
+        roughness: 0.85,
+        flatShading: true,
+      });
+      const strapMat = new THREE.MeshStandardMaterial({
+        color: '#7C4422',
+        roughness: 0.78,
+      });
+      const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.56, 10), clothMat);
+      roll.rotation.z = Math.PI / 2;
+      roll.scale.set(1, 0.82, 1.18);
+      roll.castShadow = true;
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.146, 0.146, 0.16, 10), trimMat);
+      stripe.rotation.z = Math.PI / 2;
+      stripe.scale.set(1, 0.82, 1.18);
+      const strapL = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.018, 6, 12), strapMat);
+      strapL.rotation.y = Math.PI / 2;
+      strapL.position.x = -0.17;
+      const strapR = strapL.clone();
+      strapR.position.x = 0.17;
+      holder.add(roll, stripe, strapL, strapR);
+      break;
+    }
     default: {
       const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), accentMat);
       gem.castShadow = true;
@@ -1721,6 +1757,206 @@ export function buildPickupItemMesh(meshKind: PickupMeshKind, colorHex: string):
   }
 
   return holder;
+}
+
+export interface ParachuteBlanketRig {
+  group: THREE.Group;
+  canopyMesh: THREE.Mesh;
+  canopyGeo: THREE.BufferGeometry;
+  cornerGripL: THREE.Mesh;
+  cornerGripR: THREE.Mesh;
+  segsU: number;
+  segsV: number;
+}
+
+export function buildParachuteBlanketRig(colorHex = '#E06D44'): ParachuteBlanketRig {
+  const group = new THREE.Group();
+  group.visible = false;
+
+  const segsU = 14;
+  const segsV = 10;
+  const vertCount = (segsU + 1) * (segsV + 1);
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+  const uvs = new Float32Array(vertCount * 2);
+
+  const mainCol = new THREE.Color(colorHex);
+  const stripeCol = new THREE.Color('#F4C95D');
+  const hemCol = new THREE.Color('#F7E8CF');
+  const cornerCol = new THREE.Color('#7C4422');
+  const tmpCol = new THREE.Color();
+
+  for (let iv = 0; iv <= segsV; iv++) {
+    const v = iv / segsV;
+    for (let iu = 0; iu <= segsU; iu++) {
+      const tU = iu / segsU;
+      const u = tU * 2 - 1;
+      const idx = iv * (segsU + 1) + iu;
+
+      uvs[idx * 2] = tU;
+      uvs[idx * 2 + 1] = v;
+
+      // Woven textile pattern: cream outer stitched hem, ochre double stripes, leather corner tabs
+      const isCornerTab = v < 0.16 && Math.abs(u) > 0.82;
+      const isBorder = v < 0.08 || v > 0.91 || Math.abs(u) > 0.89;
+      const isStripe = Math.abs(Math.abs(u) - 0.52) < 0.09 || Math.abs(v - 0.72) < 0.07;
+
+      if (isCornerTab) {
+        tmpCol.copy(cornerCol);
+      } else if (isBorder) {
+        tmpCol.copy(hemCol);
+      } else if (isStripe) {
+        tmpCol.copy(stripeCol);
+      } else {
+        tmpCol.copy(mainCol);
+      }
+      // Subtle woven thread modulation
+      const weave = ((iu + iv) % 2 === 0 ? 1.02 : 0.96);
+      colors[idx * 3] = Math.min(1, tmpCol.r * weave);
+      colors[idx * 3 + 1] = Math.min(1, tmpCol.g * weave);
+      colors[idx * 3 + 2] = Math.min(1, tmpCol.b * weave);
+    }
+  }
+
+  const indices: number[] = [];
+  for (let iv = 0; iv < segsV; iv++) {
+    for (let iu = 0; iu < segsU; iu++) {
+      const a = iv * (segsU + 1) + iu;
+      const b = a + 1;
+      const c = (iv + 1) * (segsU + 1) + iu;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const canopyGeo = new THREE.BufferGeometry();
+  canopyGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  canopyGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  canopyGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  canopyGeo.setIndex(indices);
+
+  const canopyMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.88,
+    metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+
+  const canopyMesh = new THREE.Mesh(canopyGeo, canopyMat);
+  canopyMesh.castShadow = true;
+  canopyMesh.receiveShadow = true;
+  canopyMesh.frustumCulled = false;
+
+  const leatherMat = new THREE.MeshStandardMaterial({
+    color: '#7C4422',
+    roughness: 0.72,
+  });
+  const gripGeo = new THREE.SphereGeometry(0.062, 8, 8);
+  const cornerGripL = new THREE.Mesh(gripGeo, leatherMat);
+  const cornerGripR = new THREE.Mesh(gripGeo, leatherMat);
+
+  group.add(canopyMesh, cornerGripL, cornerGripR);
+
+  return {
+    group,
+    canopyMesh,
+    canopyGeo,
+    cornerGripL,
+    cornerGripR,
+    segsU,
+    segsV,
+  };
+}
+
+export function updateParachuteBlanketRig(
+  rig: ParachuteBlanketRig,
+  deployBlend: number,
+  timeSec: number,
+  airSpeedNorm: number,
+  leftHandLocal: THREE.Vector3,
+  rightHandLocal: THREE.Vector3,
+  heroScale = 1
+): void {
+  const deploy = THREE.MathUtils.clamp(deployBlend, 0, 1);
+  if (deploy <= 0.01) {
+    rig.group.visible = false;
+    return;
+  }
+  rig.group.visible = true;
+
+  const s = Math.max(0.45, heroScale);
+  const posAttr = rig.canopyGeo.getAttribute('position') as THREE.BufferAttribute;
+  const arr = posAttr.array as Float32Array;
+  const { segsU, segsV } = rig;
+
+  const lx = leftHandLocal.x;
+  const ly = leftHandLocal.y;
+  const lz = leftHandLocal.z;
+  const rx = rightHandLocal.x;
+  const ry = rightHandLocal.y;
+  const rz = rightHandLocal.z;
+
+  const midX = (lx + rx) * 0.5;
+  const spanSign = rx >= lx ? 1 : -1;
+  const rawHalfSpanX = Math.abs(rx - lx) * 0.5;
+  const fullSailHalfW = Math.max(rawHalfSpanX * 1.38, 1.18 * s);
+  const sailDepth = 1.68 * s * THREE.MathUtils.lerp(0.22, 1.0, deploy);
+  const domeHeight = (1.02 + 0.16 * airSpeedNorm) * s * deploy;
+  const frontArchLift = 0.34 * s * deploy;
+
+  rig.cornerGripL.position.set(lx, ly, lz);
+  rig.cornerGripR.position.set(rx, ry, rz);
+  const gripScale = s * THREE.MathUtils.lerp(0.65, 1.0, deploy);
+  rig.cornerGripL.scale.setScalar(gripScale);
+  rig.cornerGripR.scale.setScalar(gripScale);
+
+  for (let iv = 0; iv <= segsV; iv++) {
+    const v = iv / segsV;
+    const widthEnvelope = Math.pow(v, 0.65);
+    const windBillowV = Math.sin(Math.pow(v, 0.72) * Math.PI * 0.88);
+    const trailingDrop = v > 0.76 ? Math.pow((v - 0.76) / 0.24, 1.4) * 0.22 * s * deploy : 0;
+
+    for (let iu = 0; iu <= segsU; iu++) {
+      const tU = iu / segsU;
+      const u = tU * 2 - 1;
+      const idx = iv * (segsU + 1) + iu;
+
+      // Interpolate directly between left and right hand grip points along v=0
+      const baseHandX = THREE.MathUtils.lerp(lx, rx, tU);
+      const baseHandY = THREE.MathUtils.lerp(ly, ry, tU);
+      const baseHandZ = THREE.MathUtils.lerp(lz, rz, tU);
+
+      // Wing widens softly outward above hands and cups inward toward center dome
+      const broadSailX = midX + u * spanSign * fullSailHalfW;
+      const x = THREE.MathUtils.lerp(baseHandX, broadSailX, widthEnvelope * 0.82 * deploy);
+
+      const archU = Math.sin(tU * Math.PI);
+      const cupU = Math.cos(u * Math.PI * 0.46);
+      const frontBridgeY = archU * frontArchLift * (1 - v * 0.45);
+      const sailDomeY = (0.36 * v * s * deploy) + windBillowV * cupU * domeHeight - trailingDrop;
+      const windFlutter =
+        (Math.sin(u * 4.2 + timeSec * 8.6) * 0.022 +
+          Math.cos(v * 5.5 - timeSec * 11.4) * 0.016) *
+        Math.pow(v, 1.35) *
+        s *
+        deploy;
+
+      const y = baseHandY + frontBridgeY + sailDomeY + windFlutter;
+      const z =
+        baseHandZ +
+        archU * 0.14 * s * deploy * (1 - v) -
+        sailDepth * Math.pow(v, 0.92) +
+        cupU * Math.sin(v * Math.PI) * 0.18 * s * deploy;
+
+      arr[idx * 3] = x;
+      arr[idx * 3 + 1] = y;
+      arr[idx * 3 + 2] = z;
+    }
+  }
+
+  posAttr.needsUpdate = true;
+  rig.canopyGeo.computeVertexNormals();
+  rig.canopyGeo.computeBoundingSphere();
 }
 
 export function buildLeapingFishMesh(colorHex = '#38BDF8'): THREE.Group {

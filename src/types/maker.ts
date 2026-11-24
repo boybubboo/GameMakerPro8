@@ -2149,7 +2149,8 @@ export type PickupMeshKind =
   | 'stone'
   | 'moss'
   | 'bone'
-  | 'gem';
+  | 'gem'
+  | 'blanket';
 
 export interface InventoryCustomStat {
   label: string;
