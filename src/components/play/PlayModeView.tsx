@@ -177,6 +177,11 @@ import {
   type CreatureAnimRefs,
 } from '../../three/proceduralModels';
 import {
+  attachEquipmentToCustomModel,
+  syncHeroEquipmentVisuals,
+  type HeroEquipmentHandles,
+} from '../../three/heroEquipmentAttachments';
+import {
   buildCarModel,
   CAR_PRESETS,
   DRIVING_CAMERA_VIEWS,
@@ -2092,6 +2097,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
       // Hero (custom rigged GLB or native procedural rig)
       let heroCustom: CustomModelInstance | null = null;
+      let heroCustomEquipment: HeroEquipmentHandles | null = null;
       let heroRig: ReturnType<typeof buildHeroModel> | null = null;
       let heroRoot: THREE.Group;
 
@@ -2104,6 +2110,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         });
       }
       if (heroCustom) {
+        heroCustomEquipment = attachEquipmentToCustomModel(heroCustom, style);
         heroRoot = heroCustom.group;
       } else {
         heroRig = buildHeroModel(activeProject.heroBody, activeProject.heroColors);
@@ -2944,8 +2951,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       };
 
       const getRodTipPos = (out: THREE.Vector3) => {
-        if (heroRig?.fishingRodTip) {
-          heroRig.fishingRodTip.getWorldPosition(out);
+        const rodTip = heroRig?.fishingRodTip ?? heroCustomEquipment?.fishingRodTip;
+        if (rodTip) {
+          rodTip.getWorldPosition(out);
         } else {
           out.set(
             heroX + Math.sin(heroYaw) * 1.4,
@@ -4301,6 +4309,19 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroSlashArc.visible = false;
           }
 
+          const activeHeroEquipment: HeroEquipmentHandles | null = heroRig ?? heroCustomEquipment;
+          if (activeHeroEquipment) {
+            syncHeroEquipmentVisuals(activeHeroEquipment, {
+              heldDef: heldDefNow,
+              headDef: headDefNow,
+              bodyDef: bodyDefNow,
+              accDef: accDefNow,
+              isSwimming,
+              isAttacking: attackAnimTimer > 0,
+              isFishingActive: fishingState.phase !== 'idle',
+            });
+          }
+
           if (heroCustom) {
             const isTrulyAirborne =
               !isSwimming &&
@@ -4328,48 +4349,6 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           } else if (heroRig) {
             heroRig.shadowDisc.visible = !isSwimming;
             const heldTool = heldDefNow?.toolKind ?? null;
-            const showHandProp = !isSwimming || attackAnimTimer > 0;
-            if (heroRig.sword) heroRig.sword.visible = showHandProp && heldTool === 'sword';
-            if (heroRig.axe) heroRig.axe.visible = showHandProp && heldTool === 'axe';
-            if (heroRig.fishingPole) {
-              heroRig.fishingPole.visible =
-                (showHandProp || fishingState.phase !== 'idle') && heldTool === 'fishingPole';
-            }
-            if (heroRig.torch) heroRig.torch.visible = showHandProp && heldTool === 'torch';
-            if (heroRig.heldGeneric) {
-              const isGenericHeld = Boolean(heldDefNow && !heldTool);
-              heroRig.heldGeneric.visible = showHandProp && isGenericHeld;
-              if (isGenericHeld && heldDefNow) {
-                (heroRig.heldGeneric.material as THREE.MeshStandardMaterial).color.set(
-                  heldDefNow.colorHex
-                );
-              }
-            }
-            if (heroRig.shield) {
-              heroRig.shield.visible =
-                !isSwimming && heldTool !== 'axe' && heldTool !== 'fishingPole';
-            }
-
-            // Sync wearable 3D overlays on HeroRig
-            if (heroRig.wearHeadHat) {
-              heroRig.wearHeadHat.visible = Boolean(
-                headDefNow && headDefNow.id !== 'golden_crown'
-              );
-            }
-            if (heroRig.wearHeadCrown) {
-              heroRig.wearHeadCrown.visible = headDefNow?.id === 'golden_crown';
-            }
-            if (heroRig.wearBodyCloak) {
-              heroRig.wearBodyCloak.visible = Boolean(bodyDefNow);
-              if (bodyDefNow?.wearColorHex) {
-                (heroRig.wearBodyCloak.material as THREE.MeshStandardMaterial).color.set(
-                  bodyDefNow.wearColorHex
-                );
-              }
-            }
-            if (heroRig.wearAccessoryAmulet) {
-              heroRig.wearAccessoryAmulet.visible = Boolean(accDefNow);
-            }
 
             const dampJoint = (cur: number, target: number, lambda = 12) =>
               THREE.MathUtils.damp(cur, target, lambda, dt);
@@ -5902,8 +5881,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               rt.mesh.visible = false;
               const targetItemId = rt.pickupItemId || 'wild_berries';
               const itemDef = itemByIdRef.current.get(targetItemId);
-              const isTool = itemDef?.category === 'tool';
-              addItemToBag(targetItemId, rt.pickupQty, isTool);
+              const isToolOrWeapon =
+                itemDef?.category === 'tool' || itemDef?.category === 'weapon';
+              addItemToBag(targetItemId, rt.pickupQty, isToolOrWeapon);
               AudioEngine.playSound(activeLevel.audio.coin);
               spawnCombatSparks(rt.x, rtBaseY + 0.8, rt.z, itemDef?.colorHex ?? '#FACC15', 7, 4.5);
               if (itemDef?.toolKind === 'axe') {
@@ -5932,7 +5912,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               AudioEngine.playSound(activeLevel.audio.coin);
               if (rt.pickupable && rt.pickupItemId) {
                 const itemDef = itemByIdRef.current.get(rt.pickupItemId);
-                addItemToBag(rt.pickupItemId, rt.pickupQty, itemDef?.category === 'tool');
+                addItemToBag(
+                  rt.pickupItemId,
+                  rt.pickupQty,
+                  itemDef?.category === 'tool' || itemDef?.category === 'weapon'
+                );
                 showToast(
                   `Opened ${rt.name}: +3 coins & ${itemDef?.name ?? 'Item'}!`
                 );
@@ -5964,7 +5948,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               rt.alive = false;
               rt.mesh.visible = false;
               const itemDef = itemByIdRef.current.get(rt.pickupItemId);
-              addItemToBag(rt.pickupItemId, rt.pickupQty, itemDef?.category === 'tool');
+              addItemToBag(
+                rt.pickupItemId,
+                rt.pickupQty,
+                itemDef?.category === 'tool' || itemDef?.category === 'weapon'
+              );
               AudioEngine.playSound(activeLevel.audio.coin);
               showToast(
                 `Picked up ${rt.pickupQty > 1 ? `${rt.pickupQty}× ` : ''}${itemDef?.name ?? rt.name}!`
@@ -6405,7 +6393,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 if (rt.pickupable && rt.pickupItemId && !rt.giftGiven) {
                   rt.giftGiven = true;
                   const itemDef = itemByIdRef.current.get(rt.pickupItemId);
-                  addItemToBag(rt.pickupItemId, rt.pickupQty, itemDef?.category === 'tool');
+                  addItemToBag(
+                    rt.pickupItemId,
+                    rt.pickupQty,
+                    itemDef?.category === 'tool' || itemDef?.category === 'weapon'
+                  );
                   AudioEngine.playSound('chime');
                   showToast(`${rt.name} gave you ${itemDef?.name ?? 'an item'}!`);
                 }

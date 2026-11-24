@@ -1239,6 +1239,7 @@ export function buildHeroModel(
   torchFlame.position.set(0, 0.22, 0.44);
   const torchLight = new THREE.PointLight('#FF9E44', 5.2, 14, 1.6);
   torchLight.position.set(0, 0.26, 0.48);
+  torch.userData.torchLight = torchLight;
   torch.add(torchStick, torchFlame, torchLight);
   forearmR.add(torch);
 
@@ -1281,6 +1282,7 @@ export function buildHeroModel(
     new THREE.MeshStandardMaterial({ color: '#2DD4BF', emissive: '#14B8A6', emissiveIntensity: 1.2, roughness: 0.2 })
   );
   amuletGem.position.z = 0.015;
+  wearAccessoryAmulet.userData.tintMeshes = [amuletGem];
   wearAccessoryAmulet.add(amuletRing, amuletGem);
   bodyRoot.add(wearAccessoryAmulet);
 
@@ -1365,6 +1367,7 @@ export function buildHeroModel(
   );
   fFeather.position.set(0.22, 0.18, 0.02);
   fFeather.rotation.z = -0.35;
+  wearHeadHat.userData.tintMeshes = [fBrim, fCrown];
   wearHeadHat.add(fBrim, fCrown, fBand, fFeather);
   head.add(wearHeadHat);
 
@@ -1373,12 +1376,15 @@ export function buildHeroModel(
   wearHeadCrown.visible = false;
   const crownBase = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.2, 0.14, 7), goldMat);
   wearHeadCrown.add(crownBase);
+  const crownTintMeshes: THREE.Mesh[] = [crownBase];
   for (let i = 0; i < 5; i++) {
     const ang = (i / 5) * Math.PI * 2;
     const pt = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.14, 4), goldMat);
     pt.position.set(Math.cos(ang) * 0.19, 0.11, Math.sin(ang) * 0.19);
     wearHeadCrown.add(pt);
+    crownTintMeshes.push(pt);
   }
+  wearHeadCrown.userData.tintMeshes = crownTintMeshes;
   head.add(wearHeadCrown);
 
   if (creatureType) {
