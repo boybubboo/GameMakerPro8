@@ -334,7 +334,7 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               </button>
               <button
                 type="button"
-                onClick={() => store.setSelectedTab('actions')}
+                onClick={() => store.openHeroActions()}
                 className="px-3.5 py-1.5 rounded-xl bg-[#F59E0B]/15 text-[#F59E0B] text-xs font-bold hover:bg-[#F59E0B]/25"
               >
                 Change their moves →

@@ -1943,15 +1943,15 @@ export class ProceduralRigController {
       const kneeScale = THREE.MathUtils.clamp(slotTuning.kneeBend, 0.4, 1.5);
       const hipsCap = this.settings.boneMap.hips ? this.allBones.get(this.settings.boneMap.hips) : undefined;
       if (hipsCap) {
-        const refLen = Math.max(0.05, Math.min(1.5, Math.abs(hipsCap.restPos.y) || 0.8));
-        hipsCap.node.position.y = hipsCap.restPos.y - 0.34 * refLen;
+        const refLen = Math.max(0.05, Math.abs(hipsCap.restPos.y) || 0.8);
+        hipsCap.node.position.y = hipsCap.restPos.y - 0.8 * refLen;
       }
       this.applyCharSpacePose('hips', -0.06, 0, 0);
       this.applyCharSpacePose('spine', 0.08 + breath * 0.02, 0, 0);
       this.applyCharSpacePose('chest', 0.06 + breath * 0.025, 0, 0);
       this.applyCharSpacePose('head', -0.04 * headMult, lookYaw, 0);
-      this.applyCharSpacePose('leftUpperLeg', -1.42 * strength, 0, -0.09, false);
-      this.applyCharSpacePose('rightUpperLeg', -1.42 * strength, 0, 0.09, true);
+      this.applyCharSpacePose('leftUpperLeg', -1.32 * strength, 0, -0.09, false);
+      this.applyCharSpacePose('rightUpperLeg', -1.32 * strength, 0, 0.09, true);
       this.applyCharSpacePose('leftLowerLeg', 1.44 * kneeScale * strength, 0, 0, false);
       this.applyCharSpacePose('rightLowerLeg', 1.44 * kneeScale * strength, 0, 0, true);
       this.applyCharSpacePose('leftUpperArm', -0.42 * strength, 0, leftRelax * 0.85, false);

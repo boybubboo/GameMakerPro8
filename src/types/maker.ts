@@ -607,9 +607,10 @@ export type StageTab =
   | 'cast'
   | 'motion'
   | 'logic'
-  | 'actions'
-  | 'interface'
-  | 'publish';
+  | 'interface';
+
+export type MotionStudioSection = 'gait' | 'pose' | 'actions';
+export type LogicWorkspaceMode = 'rules' | 'flow';
 
 export type BiomeId =
   | 'meadow'
@@ -2286,6 +2287,8 @@ export interface MakerIssue {
   detail: string;
   symbol: string;
   tab: StageTab;
+  motionSection?: MotionStudioSection;
+  openPublish?: boolean;
   isBlocking: boolean;
 }
 

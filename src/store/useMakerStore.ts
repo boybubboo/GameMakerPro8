@@ -63,7 +63,9 @@ import type {
   InventoryItemDef,
   ItemMetadata,
   LevelEntity,
+  LogicWorkspaceMode,
   MakerIssue,
+  MotionStudioSection,
   ObjectInteractionAttributeId,
   ObjectInteractionCalibration,
   ObjectMakerDoc,
@@ -526,6 +528,7 @@ export function useMakerStore() {
   const [showingAssetVault, setShowingAssetVault] = useState(false);
   const [showingPresets, setShowingPresets] = useState(false);
   const [showingLogicFlow, setShowingLogicFlow] = useState(false);
+  const [showingPublish, setShowingPublish] = useState(false);
   const [showingDirector, setShowingDirector] = useState(false);
   const [showingTerrainEditor, setShowingTerrainEditorRaw] = useState(false);
   const [rehearseSkitId, setRehearseSkitId] = useState<string | null>(null);
@@ -578,6 +581,8 @@ export function useMakerStore() {
   const [selectedWidgetID, setSelectedWidgetID] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<EntitySection>('cast');
   const [selectedTab, setSelectedTab] = useState<StageTab>('world');
+  const [motionSection, setMotionSection] = useState<MotionStudioSection>('gait');
+  const [logicMode, setLogicMode] = useState<LogicWorkspaceMode>('rules');
   const [selectedInventoryItemId, setSelectedInventoryItemId] = useState<string | null>(null);
   const [runtimeDurability, setRuntimeDurability] = useState<
     Record<string, { durability: number; maxDurability: number }>
@@ -3398,9 +3403,10 @@ export function useMakerStore() {
       list.push({
         id: 'moves',
         title: 'Hero needs Walk & Jump',
-        detail: 'Turn on Walk and Jump in Actions so the player can get around.',
+        detail: 'Turn on Walk and Jump in Motion → Hero Actions so the player can get around.',
         symbol: 'figure.run',
-        tab: 'actions',
+        tab: 'motion',
+        motionSection: 'actions',
         isBlocking: true,
       });
     }
@@ -3442,9 +3448,10 @@ export function useMakerStore() {
       list.push({
         id: 'tagline',
         title: 'Add a cover tagline',
-        detail: 'Give your game a one-line hook on the Publish tab.',
+        detail: 'Give your game a one-line hook in Publish.',
         symbol: 'paperplane.fill',
-        tab: 'publish',
+        tab: 'world',
+        openPublish: true,
         isBlocking: false,
       });
     }
@@ -3572,8 +3579,16 @@ export function useMakerStore() {
     setShowingAssetVault,
     showingPresets,
     setShowingPresets,
+    showingPublish,
+    setShowingPublish,
     showingLogicFlow,
-    setShowingLogicFlow,
+    setShowingLogicFlow: (open: boolean) => {
+      if (open) {
+        setLogicMode('flow');
+        setSelectedTab('logic');
+      }
+      setShowingLogicFlow(false);
+    },
     showingDirector,
     setShowingDirector,
     rehearseSkitId,
@@ -3680,11 +3695,20 @@ export function useMakerStore() {
     setSelectedSection,
     selectedTab,
     setSelectedTab,
+    motionSection,
+    setMotionSection,
+    logicMode,
+    setLogicMode,
     motionAssetId,
     setMotionAssetId,
     openMotionStudio: (assetId?: string) => {
       if (assetId) setMotionAssetId(assetId);
       setShowingAssetVault(false);
+      setMotionSection('gait');
+      setSelectedTab('motion');
+    },
+    openHeroActions: () => {
+      setMotionSection('actions');
       setSelectedTab('motion');
     },
     objectMakerOpen,

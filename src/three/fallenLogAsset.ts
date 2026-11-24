@@ -16,7 +16,7 @@ export function createFallenLogObjectDoc(): ObjectMakerDoc {
     interactionAttributes: ['sit'],
     interactionCalibrations: {
       sit: {
-        offset: [0, 0.44, 0.26],
+        offset: [0, 0.69, 0.14],
         yawDeg: 0,
       },
     },

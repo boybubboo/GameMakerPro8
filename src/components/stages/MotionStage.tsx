@@ -30,7 +30,9 @@ import {
   Trash2,
   Unlock,
   Upload,
+  Zap,
 } from 'lucide-react';
+import { ActionsStage } from './ActionsStage';
 import type { MakerStore } from '../../store/useMakerStore';
 import {
   getCachedAssetSync,
@@ -183,7 +185,8 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   const [lockCameraOrbit, setLockCameraOrbit] = useState(false);
 
   // Motion Editor state
-  const [studioMode, setStudioMode] = useState<'gait' | 'pose'>('gait');
+  const studioMode = store.motionSection;
+  const setStudioMode = store.setMotionSection;
   const [gaitPaused, setGaitPaused] = useState<boolean>(false);
   const [gaitRigDraft, setGaitRigDraft] = useState<CustomRigSettings | null>(null);
   const [gaitDirty, setGaitDirty] = useState<boolean>(false);
@@ -1083,57 +1086,7 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
     [selectedAsset, activeSavedPoseId, store, flashToast]
   );
 
-  // Empty state when no 3D models are imported yet
-  if (!selectedAsset || !effectiveRig) {
-    return (
-      <div className="h-full w-full flex flex-col items-center justify-center p-6 text-center bg-[#F4F5F8] dark:bg-[#0F1117]">
-        <div className="max-w-md space-y-4">
-          <div className="mx-auto w-14 h-14 rounded-2xl bg-[#7C5CFF]/15 text-[#7C5CFF] flex items-center justify-center">
-            <Film size={26} />
-          </div>
-          <h2 className="text-xl font-black tracking-tight">Character Motion Maker</h2>
-          <p className="text-sm text-slate-600 dark:text-[#949BB0]">
-            Import a rigged 3D character (.glb or .gltf) to pose joints directly in 3D, keyframe
-            custom looping animations on the timeline, and set them as default game moves.
-          </p>
-          {uploadErr && (
-            <div className="px-3 py-2 rounded-xl bg-[#F2545B]/15 text-[#F2545B] text-xs font-semibold">
-              {uploadErr}
-            </div>
-          )}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".glb,.gltf"
-              className="hidden"
-              onChange={(e) => {
-                void handleUploadGlb(e.target.files);
-                e.target.value = '';
-              }}
-            />
-            <button
-              type="button"
-              disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2.5 rounded-xl bg-[#7C5CFF] hover:bg-[#6A48F5] text-white text-xs font-bold inline-flex items-center gap-2"
-            >
-              <Upload size={14} />
-              <span>{uploading ? 'Importing…' : 'Import Rigged GLB'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => store.setShowingAssetVault(true)}
-              className="px-4 py-2.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200 dark:border-white/[0.1] text-xs font-bold inline-flex items-center gap-2"
-            >
-              <Box size={14} className="text-[#7C5CFF]" />
-              <span>Open 3D Asset Vault</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const hasRig = Boolean(selectedAsset && effectiveRig);
 
   return (
     <div className="h-full w-full flex flex-col bg-[#F4F5F8] dark:bg-[#0F1117] overflow-hidden">
@@ -1161,7 +1114,7 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               }`}
             >
               <SlidersHorizontal size={12} />
-              <span>Base Gait & Speed</span>
+              <span>Base Gait &amp; Speed</span>
             </button>
             <button
               type="button"
@@ -1175,9 +1128,24 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               <KeyRound size={12} />
               <span>Keyframe Pose</span>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsPlaying(false);
+                setStudioMode('actions');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                studioMode === 'actions'
+                  ? 'bg-[#F59E0B] text-white shadow-sm'
+                  : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Zap size={12} />
+              <span>Hero Actions</span>
+            </button>
           </div>
 
-          {studioMode === 'pose' && (
+          {hasRig && studioMode === 'pose' && (
             <input
               type="text"
               value={draft.name}
@@ -1188,38 +1156,40 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
             />
           )}
 
-          <select
-            value={draft.slot}
-            onChange={(e) =>
-              setDraft((prev) => ({ ...prev, slot: e.target.value as CustomClipSlot }))
-            }
-            aria-label="Action slot"
-            className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] border border-slate-200/80 dark:border-white/[0.08] text-xs font-semibold"
-          >
-            <optgroup label="Core Locomotion">
-              {SLOT_OPTIONS.filter((o) => o.group === 'core').map((opt) => (
-                <option key={opt.slot} value={opt.slot}>
-                  Action: {opt.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Object Interactions">
-              {SLOT_OPTIONS.filter((o) => o.group === 'object').map((opt) => (
-                <option key={opt.slot} value={opt.slot}>
-                  Object: {opt.label}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="Character Interactions">
-              {SLOT_OPTIONS.filter((o) => o.group === 'character').map((opt) => (
-                <option key={opt.slot} value={opt.slot}>
-                  Character: {opt.label}
-                </option>
-              ))}
-            </optgroup>
-          </select>
+          {hasRig && studioMode !== 'actions' && (
+            <select
+              value={draft.slot}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, slot: e.target.value as CustomClipSlot }))
+              }
+              aria-label="Action slot"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] border border-slate-200/80 dark:border-white/[0.08] text-xs font-semibold"
+            >
+              <optgroup label="Core Locomotion">
+                {SLOT_OPTIONS.filter((o) => o.group === 'core').map((opt) => (
+                  <option key={opt.slot} value={opt.slot}>
+                    Action: {opt.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Object Interactions">
+                {SLOT_OPTIONS.filter((o) => o.group === 'object').map((opt) => (
+                  <option key={opt.slot} value={opt.slot}>
+                    Object: {opt.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Character Interactions">
+                {SLOT_OPTIONS.filter((o) => o.group === 'character').map((opt) => (
+                  <option key={opt.slot} value={opt.slot}>
+                    Character: {opt.label}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          )}
 
-          {toast && (
+          {toast && studioMode !== 'actions' && (
             <span className="text-xs font-bold text-[#20B46A] inline-flex items-center gap-1 whitespace-nowrap">
               <Check size={13} />
               <span>{toast}</span>
@@ -1228,7 +1198,11 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {studioMode === 'gait' ? (
+          {studioMode === 'actions' ? (
+            <span className="text-xs font-bold text-slate-500 dark:text-[#949BB0] tabular-nums">
+              {store.currentProject?.enabledActions.length ?? 0} hero moves enabled
+            </span>
+          ) : hasRig && studioMode === 'gait' ? (
             <>
               <button
                 type="button"
@@ -1253,7 +1227,7 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                 <span>Reset</span>
               </button>
             </>
-          ) : (
+          ) : hasRig ? (
             <>
               {savedPresetId && (
                 <button
@@ -1311,32 +1285,79 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                 <span>Capture Pose</span>
               </button>
             </>
-          )}
+          ) : null}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".glb,.gltf"
-            className="hidden"
-            onChange={(e) => {
-              void handleUploadGlb(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#2A3142] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
-          >
-            <Upload size={12} className="text-[#7C5CFF]" />
-            <span>{uploading ? 'Loading…' : 'Import GLB'}</span>
-          </button>
+          {studioMode !== 'actions' && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".glb,.gltf"
+                className="hidden"
+                onChange={(e) => {
+                  void handleUploadGlb(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#2A3142] text-xs font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <Upload size={12} className="text-[#7C5CFF]" />
+                <span>{uploading ? 'Loading…' : 'Import GLB'}</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* MAIN 3-COLUMN WORKSPACE */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden maker-scroll">
+      {studioMode === 'actions' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ActionsStage store={store} />
+        </div>
+      ) : !selectedAsset || !effectiveRig ? (
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 text-center">
+          <div className="max-w-md space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-[#7C5CFF]/15 text-[#7C5CFF] flex items-center justify-center">
+              <Film size={26} />
+            </div>
+            <h2 className="text-xl font-black tracking-tight">Character Motion Maker</h2>
+            <p className="text-sm text-slate-600 dark:text-[#949BB0]">
+              Import a rigged 3D character (.glb or .gltf) to pose joints directly in 3D, keyframe
+              custom looping animations on the timeline, and set them as default game moves.
+            </p>
+            {uploadErr && (
+              <div className="px-3 py-2 rounded-xl bg-[#F2545B]/15 text-[#F2545B] text-xs font-semibold">
+                {uploadErr}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2.5 rounded-xl bg-[#7C5CFF] hover:bg-[#6A48F5] text-white text-xs font-bold inline-flex items-center gap-2"
+              >
+                <Upload size={14} />
+                <span>{uploading ? 'Importing…' : 'Import Rigged GLB'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => store.setShowingAssetVault(true)}
+                className="px-4 py-2.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200 dark:border-white/[0.1] text-xs font-bold inline-flex items-center gap-2"
+              >
+                <Box size={14} className="text-[#7C5CFF]" />
+                <span>Open 3D Asset Vault</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* MAIN 3-COLUMN WORKSPACE */}
+          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden maker-scroll">
         {/* LEFT SIDEBAR: SAVED POSES & MOVES LIBRARY */}
         <aside className="w-full lg:w-64 xl:w-72 shrink-0 lg:h-full lg:overflow-y-auto maker-scroll bg-white dark:bg-[#171A23] border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-white/[0.08] p-3.5 space-y-3.5">
           {/* Active Character Bar */}
@@ -2871,6 +2892,8 @@ export const MotionStage: React.FC<{ store: MakerStore }> = ({ store }) => {
             </div>
           </div>
         </section>
+      )}
+        </>
       )}
     </div>
   );

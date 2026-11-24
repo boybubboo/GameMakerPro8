@@ -67,7 +67,7 @@ export function getDefaultCalibrationForAttribute(
 }
 
 function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number) {
-  rig.bodyPivot.position.set(0, 0, 0);
+  rig.bodyPivot.position.set(0, 0.85, 0);
   rig.bodyPivot.rotation.set(0, 0, 0);
   rig.head.rotation.set(0, 0, 0);
   rig.armL.rotation.set(0, 0, 0);
@@ -84,17 +84,17 @@ function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number)
   const fast = Math.sin(t * 7.5);
   switch (slot) {
     case 'sit':
-      rig.bodyPivot.position.y = -0.32;
+      rig.bodyPivot.position.y = 0.85 - 0.43;
       rig.bodyPivot.rotation.x = -0.05;
-      rig.legL.rotation.x = -1.42;
-      rig.legR.rotation.x = -1.42;
+      rig.legL.rotation.x = -1.26;
+      rig.legR.rotation.x = -1.26;
       rig.armL.rotation.x = -0.25 + wave * 0.03;
       rig.armR.rotation.x = -0.25 - wave * 0.03;
       if (rig.forearmL) rig.forearmL.rotation.x = -0.35;
       if (rig.forearmR) rig.forearmR.rotation.x = -0.35;
       break;
     case 'sleep':
-      rig.bodyPivot.position.set(0, 0.28, -0.35);
+      rig.bodyPivot.position.set(0, 0.85 + 0.28, -0.35);
       rig.bodyPivot.rotation.x = -Math.PI * 0.48;
       rig.armL.rotation.x = -0.15;
       rig.armR.rotation.x = -0.15;
@@ -108,7 +108,7 @@ function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number)
       rig.legR.rotation.x = -0.55 + fast * 0.42;
       break;
     case 'climbStairs':
-      rig.bodyPivot.position.y = Math.abs(fast) * 0.08;
+      rig.bodyPivot.position.y = 0.85 + Math.abs(fast) * 0.08;
       rig.bodyPivot.rotation.x = 0.14;
       rig.legL.rotation.x = -0.3 + fast * 0.62;
       rig.legR.rotation.x = -0.3 - fast * 0.62;
@@ -118,7 +118,7 @@ function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number)
     case 'crouch':
     case 'sneak': {
       const s = slot === 'sneak' ? Math.sin(t * 5.0) : 0;
-      rig.bodyPivot.position.y = -0.24 + Math.abs(s) * 0.03;
+      rig.bodyPivot.position.y = 0.85 - 0.24 + Math.abs(s) * 0.03;
       rig.bodyPivot.rotation.x = slot === 'sneak' ? 0.34 : 0.24;
       rig.legL.rotation.x = -0.62 + s * 0.38;
       rig.legR.rotation.x = -0.62 - s * 0.38;
@@ -152,7 +152,7 @@ function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number)
       if (rig.forearmR) rig.forearmR.rotation.x = -0.35;
       break;
     case 'lift':
-      rig.bodyPivot.position.y = -0.12 + Math.abs(wave) * 0.08;
+      rig.bodyPivot.position.y = 0.85 - 0.12 + Math.abs(wave) * 0.08;
       rig.armL.rotation.x = -1.6 - wave * 0.25;
       rig.armR.rotation.x = -1.6 - wave * 0.25;
       break;
@@ -183,7 +183,7 @@ function animateProceduralHeroRig(rig: HeroRig, slot: CustomClipSlot, t: number)
     }
     case 'jump': {
       const j = Math.abs(Math.sin(t * 2.8));
-      rig.bodyPivot.position.y = j * 0.48;
+      rig.bodyPivot.position.y = 0.85 + j * 0.48;
       rig.armL.rotation.x = -1.9 * j;
       rig.armR.rotation.x = -1.9 * j;
       rig.legL.rotation.x = -0.35 * j;

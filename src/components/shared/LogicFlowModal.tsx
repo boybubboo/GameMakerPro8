@@ -31,6 +31,13 @@ interface LogicFlowModalProps {
   onClose: () => void;
 }
 
+export interface LogicFlowWorkspaceProps {
+  store: MakerStore;
+  embedded?: boolean;
+  onClose?: () => void;
+  onSwitchToRules?: () => void;
+}
+
 type NodeRole = 'entity' | 'when' | 'if' | 'then';
 type TraceStatus = 'idle' | 'passed' | 'blocked' | 'fired' | 'disabled';
 
@@ -114,7 +121,20 @@ function normalizeFlagKey(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }) => {
+export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }) => (
+  <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-2 sm:p-4">
+    <div className="w-full max-w-[1440px] h-[min(93vh,860px)] rounded-2xl bg-white dark:bg-[#141720] border border-slate-200/80 dark:border-white/[0.1] shadow-2xl flex flex-col overflow-hidden">
+      <LogicFlowWorkspace store={store} onClose={onClose} />
+    </div>
+  </div>
+);
+
+export const LogicFlowWorkspace: React.FC<LogicFlowWorkspaceProps> = ({
+  store,
+  embedded = false,
+  onClose,
+  onSwitchToRules,
+}) => {
   const { currentLevel } = store;
   const [scopeEntityId, setScopeEntityId] = useState<string>('all');
   const [showCrossLinks, setShowCrossLinks] = useState(true);
@@ -847,33 +867,36 @@ export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-2 sm:p-4">
-      <div className="w-full max-w-[1440px] h-[min(93vh,860px)] rounded-2xl bg-white dark:bg-[#141720] border border-slate-200/80 dark:border-white/[0.1] shadow-2xl flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <header className="shrink-0 px-5 py-3 border-b border-slate-200/80 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+    <div className={embedded ? 'flex-1 min-h-0 flex flex-col bg-white dark:bg-[#141720] overflow-hidden' : 'flex-1 min-h-0 flex flex-col overflow-hidden'}>
+      {/* Top Bar */}
+      <header className="shrink-0 px-4 sm:px-5 py-2.5 border-b border-slate-200/80 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#171A23]">
+        <div className="flex items-center gap-3 min-w-0">
+          {!embedded && (
             <div className="w-9 h-9 rounded-xl bg-[#7C5CFF]/15 text-[#7C5CFF] flex items-center justify-center shrink-0">
               <Workflow size={18} />
             </div>
-            <div className="min-w-0">
+          )}
+          <div className="min-w-0">
+            {!embedded && (
               <h2 className="text-base font-extrabold tracking-tight truncate">
                 Logic Flow Visualizer
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#949BB0] tabular-nums">
-                <span>{currentLevel.name}</span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  {totalRules} rule{totalRules === 1 ? '' : 's'}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  {diagnostics.length === 0
-                    ? 'No rule issues'
-                    : `${diagnostics.length} issue${diagnostics.length === 1 ? '' : 's'} detected`}
-                </span>
-              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#949BB0] tabular-nums">
+              <span className="font-bold text-slate-700 dark:text-slate-200">{currentLevel.name}</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {totalRules} rule{totalRules === 1 ? '' : 's'}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span className={diagnostics.length > 0 ? 'text-[#F59E0B] font-semibold' : ''}>
+                {diagnostics.length === 0
+                  ? 'No rule issues'
+                  : `${diagnostics.length} issue${diagnostics.length === 1 ? '' : 's'} detected`}
+              </span>
             </div>
           </div>
+        </div>
 
           {/* Graph Controls */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -949,14 +972,16 @@ export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Logic Flow"
-              className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-500"
-            >
-              <X size={16} />
-            </button>
+            {!embedded && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close Logic Flow"
+                className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-500"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </header>
 
@@ -1617,12 +1642,16 @@ export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }
                           onClick={() => {
                             store.setSelectedEntityID(selectedEntity.id);
                             store.setSelectedTab('logic');
-                            onClose();
+                            if (onSwitchToRules) {
+                              onSwitchToRules();
+                            } else {
+                              onClose?.();
+                            }
                           }}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1F2430] hover:bg-[#7C5CFF]/15 hover:text-[#7C5CFF] text-[11px] font-bold shrink-0"
                         >
                           <Eye size={12} />
-                          <span>Logic Tab</span>
+                          <span>{onSwitchToRules ? 'Basic Rules' : 'Logic Tab'}</span>
                         </button>
                       </div>
 
@@ -1973,7 +2002,6 @@ export const LogicFlowModal: React.FC<LogicFlowModalProps> = ({ store, onClose }
             </div>
           </aside>
         </div>
-      </div>
     </div>
   );
 };

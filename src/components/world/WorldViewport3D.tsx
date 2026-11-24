@@ -56,6 +56,7 @@ import {
   disposeObject3D,
   ensureSkyDome,
   setupSceneEnvironment,
+  syncSkyDomeToCamera,
   updateIslandTerrainGeometryInPlace,
   updateSkyClouds,
   type IslandSceneHandles,
@@ -524,6 +525,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
 
     let envTex: THREE.Texture | null = null;
     let postPipeline: PostProcessingPipeline | null = null;
+    const _sunDirScratch = new THREE.Vector3();
 
     const islandContainer = new THREE.Group();
     const entitiesContainer = new THREE.Group();
@@ -1686,11 +1688,13 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
             refs.islandHandles.windUniform.value
           );
         }
+        syncSkyDomeToCamera(scene, camera.position);
         try {
           if (postPipeline) {
+            _sunDirScratch.copy(sun.position).sub(sun.target.position);
             postPipeline.render({
               config: propsRef.current.project.postProcessing,
-              sunPosition: sun.position,
+              sunPosition: _sunDirScratch,
               sunColor: sun.color,
               sunIntensity: sun.intensity,
               isDungeon: getEnvironmentType(curLevel) === 'dungeon',

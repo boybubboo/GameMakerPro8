@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
-import { CheckCircle2, Download, Sparkles, TriangleAlert } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { CheckCircle2, Download, Sparkles, TriangleAlert, X } from 'lucide-react';
 import type { MakerStore } from '../../store/useMakerStore';
 import { MakerIcon } from '../shared/IconMap';
 import { CountTile, FieldLabel, IconBadge, MakerCard } from '../shared/MakerUI';
 
-export const PublishStage: React.FC<{ store: MakerStore }> = ({ store }) => {
+export const PublishStage: React.FC<{ store: MakerStore; onClose?: () => void }> = ({
+  store,
+  onClose,
+}) => {
   const { currentProject, issues } = store;
   const [nickname, setNickname] = useState('');
   const [includeAssets, setIncludeAssets] = useState(true);
@@ -64,7 +67,14 @@ export const PublishStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               <button
                 key={issue.id}
                 type="button"
-                onClick={() => store.setSelectedTab(issue.tab)}
+                onClick={() => {
+                  if (issue.openPublish) return;
+                  if (issue.motionSection) {
+                    store.setMotionSection(issue.motionSection);
+                  }
+                  store.setSelectedTab(issue.tab);
+                  onClose?.();
+                }}
                 className="w-full flex items-start gap-2.5 p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-left transition-colors"
               >
                 <TriangleAlert
@@ -268,6 +278,63 @@ export const PublishStage: React.FC<{ store: MakerStore }> = ({ store }) => {
           </p>
         </div>
       </aside>
+    </div>
+  );
+};
+
+export const PublishModal: React.FC<{ store: MakerStore; onClose: () => void }> = ({
+  store,
+  onClose,
+}) => {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  if (!store.currentProject) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Publish and Share Game"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-6xl h-[min(90vh,820px)] rounded-2xl bg-[#F4F5F8] dark:bg-[#0F1117] border border-slate-200/80 dark:border-white/[0.1] shadow-2xl flex flex-col overflow-hidden"
+      >
+        <header className="shrink-0 px-5 py-3 bg-white dark:bg-[#171A23] border-b border-slate-200/80 dark:border-white/[0.08] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-[#0EA5E9]/15 text-[#0EA5E9] flex items-center justify-center shrink-0">
+              <MakerIcon symbol="paperplane.fill" size={16} color="#0EA5E9" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm font-black tracking-tight truncate">
+                Publish &amp; Share
+              </h2>
+              <p className="text-[11px] text-slate-500 dark:text-[#949BB0] truncate">
+                {store.currentProject.name} · Readiness checklist &amp; shareable bundle
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Publish"
+            className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-500 hover:text-slate-900 dark:hover:text-white"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <PublishStage store={store} onClose={onClose} />
+        </div>
+      </div>
     </div>
   );
 };

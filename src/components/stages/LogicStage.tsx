@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clapperboard, Lightbulb, Plus, Trash2, Workflow } from 'lucide-react';
+import { Clapperboard, Lightbulb, ListChecks, Plus, Trash2, Workflow } from 'lucide-react';
 import {
   BehaviorVocabulary,
   EntityKindMeta,
@@ -9,165 +9,245 @@ import {
 import type { MakerStore } from '../../store/useMakerStore';
 import type { BehaviorCard, LevelEntity } from '../../types/maker';
 import { uid } from '../../utils/terrain';
+import { LogicFlowWorkspace } from '../shared/LogicFlowModal';
 import { EmptyHint, FieldLabel, IconBadge, MakerCard } from '../shared/MakerUI';
 
 export const LogicStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   const { currentLevel, currentEntity } = store;
   if (!currentLevel) return null;
 
+  const logicMode = store.logicMode;
   const recipes = currentEntity
     ? RecipeLibrary.filter((r) => r.kinds.includes(currentEntity.kind))
     : [];
   const shownRecipes = recipes.length > 0 ? recipes : RecipeLibrary.slice(0, 4);
+  const totalRules = currentLevel.entities.reduce((sum, ent) => sum + ent.cards.length, 0);
 
   return (
-    <div className="h-full min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden maker-scroll">
-      {/* Left Sidebar: Entities in level */}
-      <aside className="w-full lg:w-72 shrink-0 lg:h-full lg:min-h-0 bg-white dark:bg-[#171A23] border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-white/[0.08] lg:overflow-y-auto maker-scroll p-4 space-y-3">
-        <h2 className="text-base font-extrabold">Rules in this level</h2>
-        {currentLevel.entities.length === 0 ? (
-          <p className="text-xs text-slate-500 dark:text-[#949BB0]">
-            Add something in the Cast or World tab and it will show up here.
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {currentLevel.entities.map((ent) => {
-              const meta = EntityKindMeta[ent.kind];
-              const selected = ent.id === store.selectedEntityID;
-              return (
-                <button
-                  key={ent.id}
-                  type="button"
-                  onClick={() => store.setSelectedEntityID(ent.id)}
-                  className={`w-full flex items-center gap-2.5 p-2 rounded-xl border text-left transition-colors ${
-                    selected
-                      ? 'bg-[#7C5CFF]/15 border-[#7C5CFF]/50'
-                      : 'border-transparent hover:bg-slate-100 dark:hover:bg-[#1F2430]'
-                  }`}
-                >
-                  <IconBadge symbol={meta.symbol} tint={meta.tint} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold truncate">{ent.name}</div>
-                    <div className="text-[11px] text-slate-500 dark:text-[#949BB0]">
-                      {ent.cards.length} rule{ent.cards.length === 1 ? '' : 's'}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
+    <div className="h-full min-h-0 flex flex-col bg-[#F4F5F8] dark:bg-[#0F1117] overflow-hidden">
+      {/* Unified Logic Stage Header: Basic Rules vs Advanced Flow Graph */}
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2.5 px-4 py-2 bg-white dark:bg-[#171A23] border-b border-slate-200/80 dark:border-white/[0.08]">
+        <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 pr-2.5 border-r border-slate-200/80 dark:border-white/[0.08]">
+            <Workflow size={15} className="text-[#A855F7] shrink-0" />
+            <span className="text-sm font-black tracking-tight whitespace-nowrap">
+              Logic Studio
+            </span>
           </div>
-        )}
 
-        <div className="pt-3 border-t border-slate-200/70 dark:border-white/[0.08] flex items-center gap-2 text-[11px] text-slate-500 dark:text-[#949BB0]">
-          <Lightbulb size={14} className="text-[#F59E0B] shrink-0" />
-          <span>A rule is always: When, If, Then.</span>
+          <div
+            role="tablist"
+            aria-label="Logic workspace mode"
+            className="inline-flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] border border-slate-200/80 dark:border-white/[0.08]"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={logicMode === 'rules'}
+              onClick={() => store.setLogicMode('rules')}
+              className={`px-3 py-1 rounded-lg text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                logicMode === 'rules'
+                  ? 'bg-[#A855F7] text-white shadow-sm'
+                  : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <ListChecks size={13} />
+              <span>Basic Rules</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={logicMode === 'flow'}
+              onClick={() => store.setLogicMode('flow')}
+              className={`px-3 py-1 rounded-lg text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                logicMode === 'flow'
+                  ? 'bg-[#7C5CFF] text-white shadow-sm'
+                  : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Workflow size={13} />
+              <span>Flow Graph</span>
+            </button>
+          </div>
+
+          <span className="hidden sm:inline text-xs font-semibold text-slate-500 dark:text-[#949BB0] tabular-nums">
+            {currentLevel.name} · {totalRules} rule{totalRules === 1 ? '' : 's'}
+          </span>
         </div>
-      </aside>
 
-      {/* Main Content */}
-      <main className="shrink-0 lg:shrink lg:flex-1 lg:h-full lg:min-h-0 lg:min-w-0 lg:overflow-y-auto maker-scroll p-4 sm:p-6 space-y-5">
-        {currentEntity ? (
-          <>
-            <MakerCard className="flex flex-wrap items-center gap-4">
-              <IconBadge
-                symbol={EntityKindMeta[currentEntity.kind].symbol}
-                tint={EntityKindMeta[currentEntity.kind].tint}
-                size={48}
-              />
-              <div className="flex-1 min-w-[160px]">
-                <h2 className="text-lg font-extrabold">{currentEntity.name}</h2>
-                <p className="text-xs text-slate-500 dark:text-[#949BB0]">
-                  {EntityKindMeta[currentEntity.kind].title} · {currentEntity.cards.length} rule
-                  {currentEntity.cards.length === 1 ? '' : 's'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => store.setShowingDirector(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F59E0B]/15 text-[#D97706] dark:text-[#FBBF24] hover:bg-[#F59E0B]/25 text-xs font-bold whitespace-nowrap"
-                >
-                  <Clapperboard size={14} />
-                  <span>Story Director</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => store.setShowingLogicFlow(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-xs font-bold whitespace-nowrap"
-                >
-                  <Workflow size={14} className="text-[#A855F7]" />
-                  <span>Logic Flow</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => store.addEmptyCard(currentEntity.id)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#A855F7] text-white text-xs font-bold hover:opacity-90 whitespace-nowrap"
-                >
-                  <Plus size={14} />
-                  <span>Write a rule</span>
-                </button>
-              </div>
-            </MakerCard>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => store.setShowingDirector(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F59E0B]/15 text-[#D97706] dark:text-[#FBBF24] hover:bg-[#F59E0B]/25 text-xs font-bold whitespace-nowrap"
+          >
+            <Clapperboard size={13} />
+            <span>Story Director</span>
+          </button>
+          {currentEntity && (
+            <button
+              type="button"
+              onClick={() => {
+                store.addEmptyCard(currentEntity.id);
+                if (logicMode !== 'rules') store.setLogicMode('rules');
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#A855F7] text-white text-xs font-bold hover:opacity-90 whitespace-nowrap"
+            >
+              <Plus size={13} />
+              <span>Write a rule</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-            {/* Recipe shelf */}
-            <section className="space-y-2">
-              <div className="flex items-baseline justify-between">
-                <h3 className="text-sm font-extrabold">Ready-made rules</h3>
-                <span className="text-[11px] text-slate-500 dark:text-[#949BB0]">One click to add</span>
+      {logicMode === 'flow' ? (
+        <LogicFlowWorkspace
+          store={store}
+          embedded
+          onSwitchToRules={() => store.setLogicMode('rules')}
+        />
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden maker-scroll">
+          {/* Left Sidebar: Entities in level */}
+          <aside className="w-full lg:w-72 shrink-0 lg:h-full lg:min-h-0 bg-white dark:bg-[#171A23] border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-white/[0.08] lg:overflow-y-auto maker-scroll p-4 space-y-3">
+            <h2 className="text-base font-extrabold">Rules in this level</h2>
+            {currentLevel.entities.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-[#949BB0]">
+                Add something in the Cast or World tab and it will show up here.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {currentLevel.entities.map((ent) => {
+                  const meta = EntityKindMeta[ent.kind];
+                  const selected = ent.id === store.selectedEntityID;
+                  return (
+                    <button
+                      key={ent.id}
+                      type="button"
+                      onClick={() => store.setSelectedEntityID(ent.id)}
+                      className={`w-full flex items-center gap-2.5 p-2 rounded-xl border text-left transition-colors ${
+                        selected
+                          ? 'bg-[#A855F7]/15 border-[#A855F7]/50'
+                          : 'border-transparent hover:bg-slate-100 dark:hover:bg-[#1F2430]'
+                      }`}
+                    >
+                      <IconBadge symbol={meta.symbol} tint={meta.tint} size={32} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold truncate">{ent.name}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-[#949BB0]">
+                          {ent.cards.length} rule{ent.cards.length === 1 ? '' : 's'}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="flex gap-2.5 overflow-x-auto pb-1 maker-scroll">
-                {shownRecipes.map((recipe) => (
-                  <button
-                    key={recipe.id}
-                    type="button"
-                    onClick={() => store.applyRecipe(recipe)}
-                    className="shrink-0 w-44 p-3 rounded-2xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#A855F7] text-left space-y-1.5 transition-all"
-                  >
-                    <IconBadge symbol={recipe.symbol} tint="#A855F7" size={32} />
-                    <div className="text-xs font-bold truncate">{recipe.title}</div>
-                    <div className="text-[11px] text-slate-500 dark:text-[#949BB0] line-clamp-2 leading-snug">
-                      {recipe.blurb}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
+            )}
 
-            {/* Rule Cards */}
-            {currentEntity.cards.length === 0 ? (
+            <div className="pt-3 border-t border-slate-200/70 dark:border-white/[0.08] flex items-center gap-2 text-[11px] text-slate-500 dark:text-[#949BB0]">
+              <Lightbulb size={14} className="text-[#F59E0B] shrink-0" />
+              <span>A rule is always: When, If, Then.</span>
+            </div>
+          </aside>
+
+          {/* Main Content */}
+          <main className="shrink-0 lg:shrink lg:flex-1 lg:h-full lg:min-h-0 lg:min-w-0 lg:overflow-y-auto maker-scroll p-4 sm:p-6 space-y-5">
+            {currentEntity ? (
+              <>
+                <MakerCard className="flex flex-wrap items-center gap-4">
+                  <IconBadge
+                    symbol={EntityKindMeta[currentEntity.kind].symbol}
+                    tint={EntityKindMeta[currentEntity.kind].tint}
+                    size={48}
+                  />
+                  <div className="flex-1 min-w-[160px]">
+                    <h2 className="text-lg font-extrabold">{currentEntity.name}</h2>
+                    <p className="text-xs text-slate-500 dark:text-[#949BB0]">
+                      {EntityKindMeta[currentEntity.kind].title} · {currentEntity.cards.length} rule
+                      {currentEntity.cards.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => store.setLogicMode('flow')}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#7C5CFF]/15 text-[#7C5CFF] hover:bg-[#7C5CFF]/25 text-xs font-bold whitespace-nowrap"
+                    >
+                      <Workflow size={14} />
+                      <span>Inspect in Flow</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => store.addEmptyCard(currentEntity.id)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#A855F7] text-white text-xs font-bold hover:opacity-90 whitespace-nowrap"
+                    >
+                      <Plus size={14} />
+                      <span>Write a rule</span>
+                    </button>
+                  </div>
+                </MakerCard>
+
+                {/* Recipe shelf */}
+                <section className="space-y-2">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="text-sm font-extrabold">Ready-made rules</h3>
+                    <span className="text-[11px] text-slate-500 dark:text-[#949BB0]">One click to add</span>
+                  </div>
+                  <div className="flex gap-2.5 overflow-x-auto pb-1 maker-scroll">
+                    {shownRecipes.map((recipe) => (
+                      <button
+                        key={recipe.id}
+                        type="button"
+                        onClick={() => store.applyRecipe(recipe)}
+                        className="shrink-0 w-44 p-3 rounded-2xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#A855F7] text-left space-y-1.5 transition-all"
+                      >
+                        <IconBadge symbol={recipe.symbol} tint="#A855F7" size={32} />
+                        <div className="text-xs font-bold truncate">{recipe.title}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-[#949BB0] line-clamp-2 leading-snug">
+                          {recipe.blurb}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Rule Cards */}
+                {currentEntity.cards.length === 0 ? (
+                  <MakerCard>
+                    <EmptyHint
+                      symbol="arrow.triangle.branch"
+                      title={`${currentEntity.name} does nothing yet`}
+                      message="Pick a ready-made rule above, or write a rule from scratch."
+                      actionTitle="Write a rule"
+                      onAction={() => store.addEmptyCard(currentEntity.id)}
+                    />
+                  </MakerCard>
+                ) : (
+                  <div className="space-y-4">
+                    {currentEntity.cards.map((card, idx) => (
+                      <RuleCardEditor
+                        key={card.id}
+                        entity={currentEntity}
+                        card={card}
+                        number={idx + 1}
+                        store={store}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
               <MakerCard>
                 <EmptyHint
                   symbol="arrow.triangle.branch"
-                  title={`${currentEntity.name} does nothing yet`}
-                  message="Pick a ready-made rule above, or write a rule from scratch."
-                  actionTitle="Write a rule"
-                  onAction={() => store.addEmptyCard(currentEntity.id)}
+                  title="Pick something to give a rule"
+                  message="Choose anything in the list on the left: a baddie, a door, a chest, or a trap."
                 />
               </MakerCard>
-            ) : (
-              <div className="space-y-4">
-                {currentEntity.cards.map((card, idx) => (
-                  <RuleCardEditor
-                    key={card.id}
-                    entity={currentEntity}
-                    card={card}
-                    number={idx + 1}
-                    store={store}
-                  />
-                ))}
-              </div>
             )}
-          </>
-        ) : (
-          <MakerCard>
-            <EmptyHint
-              symbol="arrow.triangle.branch"
-              title="Pick something to give a rule"
-              message="Choose anything in the list on the left: a baddie, a door, a chest, or a trap."
-            />
-          </MakerCard>
-        )}
-      </main>
+          </main>
+        </div>
+      )}
     </div>
   );
 };

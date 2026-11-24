@@ -158,6 +158,7 @@ import {
   disposeObject3D,
   ensureSkyDome,
   setupSceneEnvironment,
+  syncSkyDomeToCamera,
   updateSkyClouds,
   type IslandSceneHandles,
 } from '../../three/islandScene';
@@ -1793,7 +1794,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         : 52,
       (container.clientWidth || 800) / Math.max(1, container.clientHeight || 600),
       0.15,
-      2400
+      5200
     );
 
     const hemi = new THREE.HemisphereLight('#B8E4FF', '#5F7844', 0.75);
@@ -3491,6 +3492,47 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let sitTargetY = 0;
       let sitTargetZ = 0;
       let sitFacingYaw = 0;
+      let preSitCamMode: CameraMode | null = null;
+      const enterSitWithPov = (facingYaw: number) => {
+        if (isDriving || env === 'sideScroller') return;
+        const curCam = resolvedCamModeRef.current;
+        const fallbackBehind: CameraMode =
+          baseCamMode === 'firstPerson' || baseCamMode === 'heroFront' || baseCamMode === 'sideScroll'
+            ? 'front'
+            : baseCamMode;
+        preSitCamMode =
+          curCam === 'firstPerson' || curCam === 'heroFront' || curCam === 'sideScroll'
+            ? fallbackBehind
+            : curCam;
+        inputRef.current.lookPitchOffset = -0.02;
+        inputRef.current.lookYawOffset = 0;
+        inputRef.current.cameraYaw = Math.atan2(-Math.sin(facingYaw), -Math.cos(facingYaw));
+        resolvedCamModeRef.current = 'firstPerson';
+        setLiveCamMode('firstPerson');
+      };
+      const standUpFromSit = () => {
+        isSitting = false;
+        heroY = Math.max(heroY, sampleLevelHeight(activeLevel, heroX, heroZ));
+        if (isDriving || env === 'sideScroller') return;
+        const fallbackBehind: CameraMode =
+          baseCamMode === 'firstPerson' || baseCamMode === 'heroFront' || baseCamMode === 'sideScroll'
+            ? 'front'
+            : baseCamMode;
+        const behindMode: CameraMode = preSitCamMode ?? fallbackBehind;
+        preSitCamMode = null;
+        if (resolvedCamModeRef.current === 'firstPerson') {
+          heroYaw = Math.atan2(
+            -Math.sin(inputRef.current.cameraYaw),
+            -Math.cos(inputRef.current.cameraYaw)
+          );
+        }
+        smoothCamYaw = heroYaw;
+        inputRef.current.lookPitchOffset = 0;
+        inputRef.current.lookYawOffset = 0;
+        inputRef.current.cameraYaw = Math.atan2(-Math.sin(heroYaw), -Math.cos(heroYaw));
+        resolvedCamModeRef.current = behindMode;
+        setLiveCamMode(behindMode);
+      };
       let isClimbing = false;
       let climbKind: 'entity' | 'tree' | 'mountain' = 'entity';
       let climbAnchorX = 0;
@@ -3506,6 +3548,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         y: number;
         z: number;
         size: number;
+        topOffsetY: number;
         label: string;
       }[] = [];
 
@@ -3516,12 +3559,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         const out: ObjectInteractionAttributeId[] = [];
         const lower = rt.name.toLowerCase();
         if (
+          !rt.pickupable &&
+          rt.kind !== 'pickup' &&
           rt.propPreset !== 'craftingBench' &&
           (lower.includes('chair') ||
             lower.includes('bench') ||
             lower.includes('stool') ||
             lower.includes('stump') ||
             lower.includes('fallen log') ||
+            lower.includes('river stone') ||
+            lower.includes('boulder') ||
+            lower.includes('rock') ||
             lower.includes('seat') ||
             lower.includes('sofa') ||
             lower.includes('couch'))
@@ -3593,6 +3641,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               atmoSyncTimer = 0;
               applyAtmosphere(scene, sun, hemi, activeLevel, renderer, liveHour);
               _sunOffset.copy(sun.position);
+              if (Number.isFinite(lastShadowSnapX) && Number.isFinite(lastShadowSnapZ)) {
+                sun.position.set(
+                  lastShadowSnapX + _sunOffset.x,
+                  _sunOffset.y,
+                  lastShadowSnapZ + _sunOffset.z
+                );
+              }
               if (!isSoftwareGl && sun.castShadow) {
                 sun.shadow.needsUpdate = true;
               }
@@ -4004,8 +4059,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
           if (isSitting) {
             if (inp.jumpQueued || inp.attackQueued || effectiveMoveMag > 0.22) {
-              isSitting = false;
-              heroY = Math.max(heroY, sampleLevelHeight(activeLevel, heroX, heroZ));
+              standUpFromSit();
             }
           }
 
@@ -4149,7 +4203,15 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroX = sitTargetX;
             heroY = sitTargetY;
             heroZ = sitTargetZ;
-            heroYaw = sitFacingYaw;
+            if (camModeNow === 'firstPerson') {
+              const turnInput = THREE.MathUtils.clamp(moveX, -1, 1);
+              if (Math.abs(turnInput) > 0.05) {
+                inp.cameraYaw -= turnInput * 2.1 * dt;
+              }
+              heroYaw = Math.atan2(-Math.sin(inp.cameraYaw), -Math.cos(inp.cameraYaw));
+            } else {
+              heroYaw = sitFacingYaw;
+            }
             heroVelY = 0;
             airborneTimer = 0;
             jumpsUsed = 0;
@@ -4193,7 +4255,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             isSwimming = false;
             isClimbingStairs = false;
             stamina = Math.max(0, stamina - (Math.abs(vertInput) > 0.1 ? 6 : 1.5) * dt);
-            energy = Math.max(0, energy - 2.4 * dt);
+            energy = Math.max(0, energy - 0.45 * dt);
 
             if (inp.jumpQueued) {
               inp.jumpQueued = false;
@@ -4545,12 +4607,12 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const movingNow =
             (camModeNow === 'firstPerson' ? Math.abs(moveZ) > 0.08 : mag > 0.08) && canWalk;
           const energyDrainRate = isSwimming
-            ? 1.6
+            ? 0.32
             : isRunning
-            ? 2.2
+            ? 0.48
             : movingNow
-            ? 1.15
-            : 0.45;
+            ? 0.2
+            : 0.06;
           energy = Math.max(0, energy - energyDrainRate * dt);
           if (energy <= 0 && movingNow && gameElapsed - lastEnergyToast > 4.5) {
             lastEnergyToast = gameElapsed;
@@ -4741,9 +4803,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             let targetLegRX = 0;
 
             if (isSitting) {
-              targetBodyY = -0.32;
-              targetLegLX = -1.42;
-              targetLegRX = -1.42;
+              targetBodyY = -0.43;
+              targetLegLX = -1.26;
+              targetLegRX = -1.26;
               targetArmLX = -0.24;
               targetArmRX = -0.24;
               targetForearmLX = -0.36;
@@ -4958,7 +5020,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               }
             }
 
-            heroRig.bodyPivot.position.y = dampJoint(heroRig.bodyPivot.position.y, targetBodyY, 14);
+            heroRig.bodyPivot.position.y = dampJoint(heroRig.bodyPivot.position.y, 0.85 + targetBodyY, 14);
             heroRig.bodyPivot.rotation.x = isSitting ? -0.05 : isClimbing ? -0.1 : swimTiltX;
             heroRig.bodyPivot.rotation.y = dampJoint(heroRig.bodyPivot.rotation.y, targetBodyYaw, 18);
             heroRig.bodyPivot.rotation.z = dampJoint(heroRig.bodyPivot.rotation.z, targetBodyRoll, 10);
@@ -5098,7 +5160,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               } else {
                 const isAxe = heldDefNow?.toolKind === 'axe';
                 stamina = Math.max(0, stamina - (isAxe ? 16 : 20));
-                energy = Math.max(0, energy - 1.8);
+                energy = Math.max(0, energy - 0.45);
                 if (stamina <= 0) {
                   staminaExhausted = true;
                 }
@@ -5195,12 +5257,16 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   }
                   stump.position.set(bestTree.x, bestTree.y, bestTree.z);
                   scene.add(stump);
+                  stump.updateMatrixWorld(true);
+                  const stumpBox = new THREE.Box3().setFromObject(stump);
+                  const stumpTopOffset = Math.max(0.28, stumpBox.max.y - bestTree.y);
                   choppedStumps.push({
                     id: bestTree.id,
                     x: bestTree.x,
                     y: bestTree.y,
                     z: bestTree.z,
                     size: bestTree.size,
+                    topOffsetY: stumpTopOffset,
                     label: 'Tree Stump',
                   });
 
@@ -5259,6 +5325,54 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                     showToast(`Chop! (${rt.treeHp} left)`);
                   }
                   break;
+                }
+              }
+            }
+
+            if (!chopDidStrike && p >= 0.28 && p <= 0.65) {
+              const rockRule = harvestRuleByScatterRef.current.get('rock');
+              if (rockRule && islandHandles.harvestableScatter.length > 0) {
+                let bestRock: (typeof islandHandles.harvestableScatter)[number] | null = null;
+                let bestRockDist = 2.45;
+                for (let hi = 0; hi < islandHandles.harvestableScatter.length; hi++) {
+                  const hs = islandHandles.harvestableScatter[hi];
+                  if (hs.collected || hs.scatterKind !== 'rock') continue;
+                  const dx = hs.x - heroX;
+                  const dz = hs.z - heroZ;
+                  const d = Math.hypot(dx, dz);
+                  if (d > bestRockDist) continue;
+                  const dot = d > 0.01 ? (dx / d) * fwdX + (dz / d) * fwdZ : 1;
+                  if (d > 1.35 && dot < -0.15) continue;
+                  bestRockDist = d;
+                  bestRock = hs;
+                }
+                if (bestRock) {
+                  chopDidStrike = true;
+                  wearHeldDurability(1);
+                  bestRock.collected = true;
+                  for (const be of bestRock.batchedEntries) {
+                    hideBatchEntry(be, bestRock.x, bestRock.y - 60, bestRock.z);
+                  }
+                  const collectDef = itemByIdRef.current.get(rockRule.itemId);
+                  addItemToBag(
+                    rockRule.itemId,
+                    rockRule.qty,
+                    collectDef?.category === 'tool'
+                  );
+                  AudioEngine.playSound(activeLevel.audio.hit);
+                  spawnCombatSparks(
+                    bestRock.x,
+                    bestRock.y + 0.4,
+                    bestRock.z,
+                    '#94A3B8',
+                    9,
+                    5.2
+                  );
+                  showToast(
+                    `Gathered ${rockRule.qty > 1 ? `${rockRule.qty}× ` : ''}${
+                      collectDef?.name ?? 'Smooth River Stone'
+                    }!`
+                  );
                 }
               }
             }
@@ -7557,6 +7671,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               if (hs.collected) continue;
               const rule = harvestRuleMap.get(hs.scatterKind);
               if (!rule) continue;
+              // Smooth River Stones use the Use button for sitting; gather them by hitting (Ctrl / F)
+              if (hs.scatterKind === 'rock' && rule.collectMethod === 'interact') continue;
               const d = Math.hypot(hs.x - heroX, hs.z - heroZ);
               if (d <= nearestScatterDist && Math.abs(heroY - hs.y) < 2.4) {
                 nearestScatterDist = d;
@@ -7676,14 +7792,29 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               const baseY = sampleLevelHeight(activeLevel, rt.x, rt.z) + (rt.elevationY ?? 0);
               if (d <= 2.15 && Math.abs(heroY - baseY) < 2.2) {
                 if (!nearestSitTarget || d < nearestSitTarget.dist) {
+                  let fallbackSeatH = 0.44 * (rt.entityScale ?? 1);
+                  let fallbackSeatFwd = 0.14 * (rt.entityScale ?? 1);
+                  if (!rt.interactionCalibrations?.sit) {
+                    const entBox = new THREE.Box3().setFromObject(rt.mesh);
+                    if (!entBox.isEmpty()) {
+                      fallbackSeatH = THREE.MathUtils.clamp(entBox.max.y - baseY - 0.03, 0.24, 1.35);
+                      const entSize = new THREE.Vector3();
+                      entBox.getSize(entSize);
+                      fallbackSeatFwd = THREE.MathUtils.clamp(
+                        Math.min(entSize.x, entSize.z) * 0.34,
+                        0.14,
+                        0.72
+                      );
+                    }
+                  }
                   nearestSitTarget = {
                     label: rt.name,
                     x: rt.x,
                     y: baseY,
                     z: rt.z,
                     dist: d,
-                    seatHeight: 0.44 * (rt.entityScale ?? 1),
-                    seatForward: 0.24 * (rt.entityScale ?? 1),
+                    seatHeight: fallbackSeatH,
+                    seatForward: fallbackSeatFwd,
                     entityYaw: rt.entityYaw ?? 0,
                     cal: rt.interactionCalibrations?.sit,
                   };
@@ -7700,8 +7831,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                     y: st.y,
                     z: st.z,
                     dist: d,
-                    seatHeight: Math.max(0.32, st.size * 0.42),
-                    seatForward: 0.2,
+                    seatHeight: Math.max(0.24, st.topOffsetY - 0.03),
+                    seatForward: Math.min(0.11, st.size * 0.09),
                     entityYaw: 0,
                   };
                 }
@@ -7709,18 +7840,18 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             }
             for (let hi = 0; hi < islandHandles.harvestableScatter.length; hi++) {
               const hs = islandHandles.harvestableScatter[hi];
-              if (hs.collected || hs.scatterKind !== 'rock' || hs.size < 0.68) continue;
+              if (hs.collected || hs.scatterKind !== 'rock' || hs.size < 0.45) continue;
               const d = Math.hypot(hs.x - heroX, hs.z - heroZ);
               if (d <= 2.15 && Math.abs(heroY - hs.y) < 2.2) {
                 if (!nearestSitTarget || d < nearestSitTarget.dist) {
                   nearestSitTarget = {
-                    label: 'Big Rock',
+                    label: 'Smooth River Stone',
                     x: hs.x,
                     y: hs.y,
                     z: hs.z,
                     dist: d,
-                    seatHeight: Math.max(0.35, hs.size * 0.44),
-                    seatForward: 0.26,
+                    seatHeight: Math.max(0.24, hs.size * 0.52),
+                    seatForward: Math.max(0.32, hs.size * 0.56),
                     entityYaw: 0,
                   };
                 }
@@ -7730,8 +7861,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
           if (isSitting && didInteract && !interactConsumed) {
             interactConsumed = true;
-            isSitting = false;
-            heroY = Math.max(heroY, sampleLevelHeight(activeLevel, heroX, heroZ));
+            standUpFromSit();
           } else if (!isSitting && nearestSitTarget && didInteract && !interactConsumed) {
             interactConsumed = true;
             if (nearestSitTarget.cal) {
@@ -7766,6 +7896,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroY = sitTargetY;
             heroZ = sitTargetZ;
             heroYaw = sitFacingYaw;
+            enterSitWithPov(sitFacingYaw);
             showToast(
               `Sitting on ${nearestSitTarget.label} — resting to recover Energy!`
             );
@@ -8277,7 +8408,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             const pitch = THREE.MathUtils.clamp(inp.lookPitchOffset, -1.15, 1.15);
             const cosP = Math.cos(pitch);
             const sinP = Math.sin(pitch);
-            const rawEyeY = heroY + (isSwimming ? 0.98 : 1.56) + shakeY * 0.3;
+            const rawEyeY =
+              heroY + (isSitting ? 1.18 : isSwimming ? 0.98 : 1.56) + shakeY * 0.3;
             const clampedEyeY = heroInCave
               ? Math.min(rawEyeY, MountainCave.floorY + MountainCave.ceilingHeight - 0.55)
               : rawEyeY;
@@ -8554,6 +8686,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           }
         }
 
+        syncSkyDomeToCamera(scene, camera.position);
+
         islandHandles.grassSystem?.update(
           camera,
           sun,
@@ -8568,7 +8702,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           if (postPipeline) {
             postPipeline.render({
               config: activeProject.postProcessing,
-              sunPosition: sun.position,
+              sunPosition: _sunOffset,
               sunColor: sun.color,
               sunIntensity: sun.intensity,
               isDungeon: env === 'dungeon',
@@ -9615,6 +9749,9 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               <>
                 Press <span className="px-1.5 py-0.5 mx-0.5 rounded bg-white/15 font-mono text-[11px]">E / Alt</span> to sit on{' '}
                 <span className="text-[#FACC15]">{sitPrompt.label}</span>
+                {sitPrompt.label === 'Smooth River Stone' && (
+                  <span className="text-slate-300 font-normal ml-1.5">· Hit (Ctrl / F) to gather</span>
+                )}
               </>
             )}
           </span>

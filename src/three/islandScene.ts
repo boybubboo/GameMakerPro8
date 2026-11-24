@@ -812,6 +812,25 @@ export function updateSkyClouds(scene: THREE.Scene, elapsed: number, wind = 0.3)
   }
 }
 
+export function syncSkyDomeToCamera(scene: THREE.Scene, cameraPos: THREE.Vector3) {
+  let skyDome = scene.userData.__makerSkyDome as THREE.Mesh | undefined;
+  if (!skyDome) {
+    skyDome = scene.getObjectByName('maker-skydome') as THREE.Mesh | undefined;
+    if (skyDome) scene.userData.__makerSkyDome = skyDome;
+  }
+  if (skyDome) {
+    skyDome.position.set(cameraPos.x, 0, cameraPos.z);
+  }
+  let stars = scene.userData.__makerStars as THREE.Points | undefined;
+  if (!stars) {
+    stars = scene.getObjectByName('maker-stars') as THREE.Points | undefined;
+    if (stars) scene.userData.__makerStars = stars;
+  }
+  if (stars) {
+    stars.position.set(cameraPos.x, 0, cameraPos.z);
+  }
+}
+
 const skyHash21Tsl = Fn(([pIn]: [any]) => {
   const p = vec2(fract(vec2(pIn).mul(vec2(123.34, 456.21)))).toVar();
   p.addAssign(dot(p, p.add(45.32)));
@@ -865,7 +884,7 @@ export function ensureSkyDome(scene: THREE.Scene) {
     });
 
     skyMat.colorNode = Fn(() => {
-      const dir = normalize(positionWorld);
+      const dir = normalize(positionLocal);
       const elev = clamp(dir.y, 0.0, 1.0);
       const lowerT = smoothstep(0.0, 0.34, elev);
       const upperT = smoothstep(0.24, 0.95, elev);
@@ -913,6 +932,7 @@ export function ensureSkyDome(scene: THREE.Scene) {
 
     const dome = new THREE.Mesh(skyGeo, skyMat);
     dome.name = 'maker-skydome';
+    dome.frustumCulled = false;
     dome.userData.skyUniforms = {
       uZenith,
       uMidSky,
@@ -953,6 +973,7 @@ export function ensureSkyDome(scene: THREE.Scene) {
     });
     const stars = new THREE.Points(geo, mat);
     stars.name = 'maker-stars';
+    stars.frustumCulled = false;
     stars.visible = false;
     scene.userData.__makerStars = stars;
     scene.add(stars);

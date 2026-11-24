@@ -2124,7 +2124,7 @@ export class StylizedGrassSystem {
 
     if (visibleNearChunks === 0 && visibleFarChunks === 0) return;
 
-    this._sunDir.copy(sun.position);
+    this._sunDir.copy(sun.position).sub(sun.target.position);
     if (this._sunDir.lengthSq() < 0.0001) {
       this._sunDir.set(0.4, 0.75, 0.5);
     }

@@ -6,37 +6,29 @@ import {
   Clapperboard,
   CloudSun,
   FileArchive,
-  Globe,
   Layers,
   Lightbulb,
-  Map as MapIcon,
   Mountain,
   Paintbrush,
   Play,
-  Plus,
   Redo2,
   Save,
   Shapes,
   Sparkles,
   Sprout,
-  Trash2,
   Trees,
   Undo2,
   User,
   Wand2,
-  Workflow,
 } from 'lucide-react';
 import type { MakerStore } from '../../store/useMakerStore';
 import type { StageTab } from '../../types/maker';
-import { getEnvironmentType } from '../../utils/terrain';
-import { WORLD_TERRAIN_YELLOW } from '../../utils/worldMap';
 import { PlayModeView } from '../play/PlayModeView';
-import { ActionsStage } from '../stages/ActionsStage';
 import { CastStage } from '../stages/CastStage';
 import { InterfaceStage } from '../stages/InterfaceStage';
 import { LogicStage } from '../stages/LogicStage';
 import { MotionStage } from '../stages/MotionStage';
-import { PublishStage } from '../stages/PublishStage';
+import { PublishModal } from '../stages/PublishStage';
 import { WorldStage } from '../stages/WorldStage';
 import { AtmosphereDrawer } from '../world/AtmosphereDrawer';
 import { CanopyEngineModal } from '../world/CanopyEngineModal';
@@ -50,7 +42,6 @@ import { EntityAttributeModal } from './EntityAttributeModal';
 import { ExportProjectZipModal } from './ExportProjectZipModal';
 import { MakerIcon } from './IconMap';
 import { IdeasModal } from './IdeasModal';
-import { LogicFlowModal } from './LogicFlowModal';
 import { ThemeToggle } from './MakerUI';
 import { PersistentMinimapHUD } from './PersistentMinimapHUD';
 import { PostProcessingMenuModal } from './PostProcessingMenuModal';
@@ -67,22 +58,24 @@ import {
   useEditorResourceMonitor,
 } from '../../utils/resourceMonitor';
 
-const STAGE_TABS: { id: StageTab; title: string; symbol: string }[] = [
-  { id: 'world', title: 'World', symbol: 'map.fill' },
-  { id: 'cast', title: 'Cast', symbol: 'person.2.fill' },
-  { id: 'motion', title: 'Motion', symbol: 'motion.studio' },
-  { id: 'logic', title: 'Logic', symbol: 'arrow.triangle.branch' },
-  { id: 'actions', title: 'Actions', symbol: 'figure.run' },
-  { id: 'interface', title: 'Interface', symbol: 'slider.horizontal.3' },
-  { id: 'publish', title: 'Publish', symbol: 'paperplane.fill' },
+const STAGE_TABS: {
+  id: StageTab;
+  title: string;
+  symbol: string;
+  accent: string;
+}[] = [
+  { id: 'world', title: 'World', symbol: 'map.fill', accent: '#20B46A' },
+  { id: 'cast', title: 'Cast', symbol: 'person.2.fill', accent: '#0EA5E9' },
+  { id: 'motion', title: 'Motion', symbol: 'motion.studio', accent: '#7C5CFF' },
+  { id: 'logic', title: 'Logic', symbol: 'arrow.triangle.branch', accent: '#A855F7' },
+  { id: 'interface', title: 'Interface', symbol: 'slider.horizontal.3', accent: '#F59E0B' },
 ];
 
 const AUTO_SAVE_DEBOUNCE_MS = 600;
 const EDITOR_AUTOSAVE_META_KEY = 'maker.autosave.meta.v1';
 
 export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
-  const { currentProject, currentLevel, levelIndex, saveProjectStateNow } = store;
-  const [levelMenuOpen, setLevelMenuOpen] = useState(false);
+  const { currentProject, currentLevel, saveProjectStateNow } = store;
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [showingExportZip, setShowingExportZip] = useState(false);
 
@@ -174,202 +167,68 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
 
   const activeTimePreset = currentLevel ? detectTimeOfDayPreset(currentLevel) : 'noon';
 
+  const hasBlockingPublishIssue = store.issues.some((i) => i.isBlocking);
+
   return (
     <div className="h-dvh min-h-0 flex flex-col bg-[#F4F5F8] dark:bg-[#0F1117] text-slate-900 dark:text-[#F3F5FA] overflow-hidden transition-colors">
-      {/* Unified Top Bar: Project + Stage Tabs + Create / Atmosphere / Utilities / Play */}
+      {/* Unified Top Bar: Project + 5 Color-Coded Stages + Create / Atmosphere / Utilities / Play */}
       <Profiler id="EditorShell.Header" onRender={onEditorProfilerRender}>
-        <header className="shrink-0 bg-white dark:bg-[#171A23] border-b border-slate-200/80 dark:border-white/[0.08] px-3 py-2 flex items-center gap-2 z-30">
-          {/* Left: Back + Project + Level Switcher */}
+        <header className="shrink-0 bg-white dark:bg-[#171A23] border-b border-slate-200/80 dark:border-white/[0.08] px-3 py-1.5 flex items-center justify-between gap-2 z-30">
+          {/* Left: Back + Concise Project Title */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => store.closeProject()}
               title="All games"
+              aria-label="Back to all games"
               className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-[#1F2430] text-[#7C5CFF] flex items-center justify-center hover:bg-slate-200 dark:hover:bg-[#272D3C] shrink-0"
             >
               <ChevronLeft size={16} strokeWidth={2.6} />
             </button>
 
-            <div className="hidden xl:block min-w-0 max-w-[140px]">
-              <h1 className="text-sm font-black truncate leading-tight">
-                {currentProject.name}
-              </h1>
-              <div className="text-[10px] font-semibold text-slate-500 dark:text-[#949BB0] tabular-nums">
-                Level {levelIndex + 1}/{Math.max(1, currentProject.levels.length)}
-              </div>
-            </div>
-
-            {/* Level Switcher */}
-            {(() => {
-              const hasOpenWorld = currentProject.levels.some(
-                (l) => getEnvironmentType(l) === 'openWorld'
-              );
-              const isWmActive = hasOpenWorld && store.worldEditorScope === 'worldMap';
-              const wmRegions = store.resolvedWorldMap?.regions ?? [];
-              const activeRegion = currentLevel
-                ? wmRegions.find((r) => r.levelId === currentLevel.id)
-                : undefined;
-
-              return (
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLevelMenuOpen((v) => !v);
-                      setCreateMenuOpen(false);
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-xs font-bold whitespace-nowrap"
-                  >
-                    {isWmActive ? (
-                      <Globe size={12} style={{ color: WORLD_TERRAIN_YELLOW }} />
-                    ) : activeRegion ? (
-                      <span
-                        className="w-2.5 h-2.5 rounded-sm border border-black/20 shrink-0"
-                        style={{ backgroundColor: activeRegion.colorHex }}
-                      />
-                    ) : (
-                      <MapIcon size={12} className="text-[#7C5CFF]" />
-                    )}
-                    <span className="max-w-[100px] truncate">
-                      {isWmActive ? 'World Map' : currentLevel?.name ?? 'Level'}
-                    </span>
-                    <ChevronDown size={11} />
-                  </button>
-
-                  {levelMenuOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-20"
-                        onClick={() => setLevelMenuOpen(false)}
-                      />
-                      <div className="absolute left-0 mt-2 w-56 rounded-2xl bg-white dark:bg-[#171A23] shadow-xl border border-slate-200/80 dark:border-white/[0.1] py-1.5 z-30">
-                        {hasOpenWorld && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                store.enterWorldEditorScope('worldMap');
-                                setLevelMenuOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-2 px-3.5 py-2 text-left text-xs font-extrabold hover:bg-slate-100 dark:hover:bg-[#1F2430] ${
-                                isWmActive ? 'text-[#7C5CFF]' : ''
-                              }`}
-                            >
-                              <Globe size={12} style={{ color: WORLD_TERRAIN_YELLOW }} />
-                              <span className="truncate flex-1">World Map (Overview)</span>
-                            </button>
-                            <div className="my-1 border-t border-slate-200/70 dark:border-white/[0.08]" />
-                          </>
-                        )}
-                        {currentProject.levels
-                          .filter((lvl) => {
-                            if (!hasOpenWorld) return true;
-                            if (
-                              wmRegions.length === 0 &&
-                              getEnvironmentType(lvl) === 'openWorld' &&
-                              lvl.entities.length === 0 &&
-                              (lvl.terrain?.scatter.length ?? 0) === 0
-                            ) {
-                              return false;
-                            }
-                            return true;
-                          })
-                          .map((lvl, idx) => {
-                            const reg = wmRegions.find((r) => r.levelId === lvl.id);
-                            const active = !isWmActive && lvl.id === currentLevel?.id;
-                            return (
-                              <button
-                                key={lvl.id}
-                                type="button"
-                                onClick={() => {
-                                  store.enterWorldEditorScope(lvl.id);
-                                  setLevelMenuOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2 px-3.5 py-2 text-left text-xs font-semibold hover:bg-slate-100 dark:hover:bg-[#1F2430] ${
-                                  active ? 'text-[#7C5CFF] font-bold' : ''
-                                }`}
-                              >
-                                {reg ? (
-                                  <span
-                                    className="w-2.5 h-2.5 rounded-sm border border-black/20 shrink-0"
-                                    style={{ backgroundColor: reg.colorHex }}
-                                  />
-                                ) : (
-                                  <span className="w-4 text-[11px] text-slate-400 tabular-nums">
-                                    {idx + 1}.
-                                  </span>
-                                )}
-                                <span className="truncate flex-1">{reg?.name ?? lvl.name}</span>
-                              </button>
-                            );
-                          })}
-                        <div className="my-1 border-t border-slate-200/70 dark:border-white/[0.08]" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (hasOpenWorld) {
-                              const created = store.addWorldLandRegion();
-                              if (created) store.enterWorldEditorScope(created.levelId);
-                            } else {
-                              store.addLevel();
-                            }
-                            setLevelMenuOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-xs font-bold text-[#7C5CFF] hover:bg-[#7C5CFF]/10"
-                        >
-                          <Plus size={13} />
-                          <span>{hasOpenWorld ? 'Add a Land / Level' : 'Add a level'}</span>
-                        </button>
-                    {currentProject.levels.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          store.deleteCurrentLevel();
-                          setLevelMenuOpen(false);
-                        }}
-                        className="w-full flex items-center gap-2 px-3.5 py-2 text-left text-xs font-bold text-[#F2545B] hover:bg-[#F2545B]/10"
-                      >
-                        <Trash2 size={13} />
-                        <span>Delete current level</span>
-                      </button>
-                    )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
+            <h1 className="hidden lg:block text-sm font-black tracking-tight truncate max-w-[155px]">
+              {currentProject.name}
+            </h1>
           </div>
 
-          {/* Center: Inline Stage Tabs */}
+          {/* Center: Clean 5-Stage Bar with Bold Colored Typography (No Scrolling) */}
           <nav
             aria-label="Editor Stages"
-            className="flex-1 min-w-0 overflow-x-auto maker-scroll"
+            className="flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 shrink-0"
           >
-            <div className="flex items-center gap-1 min-w-max mx-auto px-1">
-              {STAGE_TABS.map((tab) => {
-                const active = store.selectedTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => store.setSelectedTab(tab.id)}
-                    className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all shrink-0 whitespace-nowrap ${
-                      active
-                        ? 'bg-[#7C5CFF] text-white shadow-xs'
-                        : 'text-slate-600 dark:text-[#949BB0] hover:bg-slate-100 dark:hover:bg-[#1F2430] hover:text-slate-900 dark:hover:text-white'
-                    }`}
-                  >
-                    <MakerIcon
-                      symbol={tab.symbol}
-                      size={13}
-                      color={active ? '#FFFFFF' : 'currentColor'}
+            {STAGE_TABS.map((tab) => {
+              const active = store.selectedTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => store.setSelectedTab(tab.id)}
+                  className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-[13px] font-black tracking-tight transition-all shrink-0 whitespace-nowrap ${
+                    active
+                      ? 'bg-slate-100/90 dark:bg-[#1F2430]'
+                      : 'hover:bg-slate-100/70 dark:hover:bg-[#1F2430]/70 opacity-85 hover:opacity-100'
+                  }`}
+                  style={{
+                    color: tab.accent,
+                    boxShadow: active ? `inset 0 0 0 1px ${tab.accent}40` : undefined,
+                  }}
+                >
+                  <MakerIcon
+                    symbol={tab.symbol}
+                    size={14}
+                    color={tab.accent}
+                  />
+                  <span>{tab.title}</span>
+                  {active && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-3 right-3 -bottom-[6px] h-[2.5px] rounded-full"
+                      style={{ backgroundColor: tab.accent }}
                     />
-                    <span>{tab.title}</span>
-                  </button>
-                );
-              })}
-            </div>
+                  )}
+                </button>
+              );
+            })}
           </nav>
 
           {/* Right: Create Menu + Atmosphere + Global Utilities + Play */}
@@ -378,10 +237,7 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
             <div className="relative">
               <button
                 type="button"
-                onClick={() => {
-                  setCreateMenuOpen((v) => !v);
-                  setLevelMenuOpen(false);
-                }}
+                onClick={() => setCreateMenuOpen((v) => !v)}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-colors ${
                   createMenuOpen
                     ? 'bg-[#7C5CFF] text-white'
@@ -548,18 +404,8 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
                     : 'text-[#F59E0B]'
                 }
               />
-              <span className="hidden md:inline">Atmosphere</span>
+              <span className="hidden 2xl:inline">Atmosphere</span>
               <CloudSun size={11} className="hidden sm:inline opacity-70" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => store.setShowingLogicFlow(true)}
-              title="Logic Flow — Node-based rule graph"
-              className="hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-xs font-bold shrink-0 whitespace-nowrap"
-            >
-              <Workflow size={13} className="text-[#A855F7]" />
-              <span>Flow</span>
             </button>
 
             <button
@@ -569,18 +415,45 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
               className="hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-xs font-bold shrink-0 whitespace-nowrap"
             >
               <Clapperboard size={13} className="text-[#F59E0B]" />
-              <span>Director</span>
+              <span className="hidden 2xl:inline">Director</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => store.setShowingPresets(true)}
-              title="Save & Load Presets"
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] text-xs font-bold shrink-0 whitespace-nowrap"
-            >
-              <Save size={13} className="text-[#20B46A]" />
-              <span className="hidden 2xl:inline">Presets</span>
-            </button>
+            {/* Save (Green Disc) + Publish (Icon-only Airplane) */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => store.setShowingPresets(true)}
+                title="Save & Load Presets"
+                aria-label="Save & Load Presets"
+                className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#272D3C] flex items-center justify-center shrink-0 transition-colors"
+              >
+                <Save size={14} className="text-[#20B46A]" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => store.setShowingPublish(true)}
+                title="Publish & Share Game"
+                aria-label="Publish & Share Game"
+                className={`relative w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                  store.showingPublish
+                    ? 'bg-[#0EA5E9] text-white'
+                    : 'bg-slate-100 dark:bg-[#1F2430] hover:bg-[#0EA5E9]/15 text-[#0EA5E9]'
+                }`}
+              >
+                <MakerIcon
+                  symbol="paperplane.fill"
+                  size={14}
+                  color={store.showingPublish ? '#FFFFFF' : '#0EA5E9'}
+                />
+                {hasBlockingPublishIssue && !store.showingPublish && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#F59E0B]"
+                  />
+                )}
+              </button>
+            </div>
 
             <button
               type="button"
@@ -658,9 +531,7 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
           {store.selectedTab === 'cast' && <CastStage store={store} />}
           {store.selectedTab === 'motion' && <MotionStage store={store} />}
           {store.selectedTab === 'logic' && <LogicStage store={store} />}
-          {store.selectedTab === 'actions' && <ActionsStage store={store} />}
           {store.selectedTab === 'interface' && <InterfaceStage store={store} />}
-          {store.selectedTab === 'publish' && <PublishStage store={store} />}
         </div>
       </Profiler>
 
@@ -681,8 +552,8 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
           <SavePresetsModal store={store} onClose={() => store.setShowingPresets(false)} />
         )}
 
-        {store.showingLogicFlow && (
-          <LogicFlowModal store={store} onClose={() => store.setShowingLogicFlow(false)} />
+        {store.showingPublish && (
+          <PublishModal store={store} onClose={() => store.setShowingPublish(false)} />
         )}
 
         {store.showingDirector && (
