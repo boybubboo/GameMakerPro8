@@ -4,6 +4,7 @@ import type {
   AssetCategory,
   EntityKind,
   LevelEntity,
+  MonsterBlueprint,
   PlatformPreset,
 } from '../types/maker';
 import { regenerateCustomAssetThumbnail, renderObject3DThumbnail } from './gltfAssetManager';
@@ -91,12 +92,12 @@ function enqueueRender(key: string, render: () => Promise<string | undefined>) {
 
 function makeSampleEntity(
   kind: EntityKind,
-  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string }
+  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string; monsterConfig?: MonsterBlueprint }
 ): LevelEntity {
   const meta = EntityKindMeta[kind];
   return {
     id: `thumb-${kind}`,
-    name: opts?.name || meta.title,
+    name: opts?.name || opts?.monsterConfig?.name || meta.title,
     kind,
     position: { x: 0.5, y: 0.5 },
     rotation: 0,
@@ -117,6 +118,7 @@ function makeSampleEntity(
     conversation: [],
     notes: '',
     cards: [],
+    monsterConfig: opts?.monsterConfig,
   };
 }
 
@@ -168,8 +170,12 @@ function buildFxOrbPreview(): THREE.Group {
 
 export function getEntityThumbnailKey(
   kind: EntityKind,
-  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string }
+  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string; monsterConfig?: MonsterBlueprint }
 ): string {
+  if (opts?.monsterConfig) {
+    const m = opts.monsterConfig;
+    return `mon:${m.id}:${m.legPairs}:${m.headCount}:${m.headStyle}:${m.hornStyle}:${m.wingStyle}:${m.tailStyle}:${m.bodyColor}:${m.accentColor}:${m.wingColor}`;
+  }
   const lower = (opts?.name ?? '').toLowerCase();
   const semanticHint =
     kind === 'scenery' ||
@@ -223,7 +229,7 @@ export function getEntityThumbnailKey(
 
 export function getOrQueueEntityThumbnail(
   kind: EntityKind,
-  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string }
+  opts?: { isBoss?: boolean; platformPreset?: PlatformPreset; name?: string; monsterConfig?: MonsterBlueprint }
 ): string | undefined {
   const key = getEntityThumbnailKey(kind, opts);
   const hit = thumbCache.get(key);

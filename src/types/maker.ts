@@ -1418,6 +1418,8 @@ export interface LevelEntity {
   elevationY?: number;
   buildingBlock?: BuildingBlockConfig;
   doorConfig?: DoorConfig;
+  // Quadruped / Multi-Legged Animal & Fantastical Monster Blueprint
+  monsterConfig?: MonsterBlueprint;
   // WebGPU r187 pipeline & zero-stutter material variant overrides
   meshletEnabled?: boolean;
   materialVariant?: EntityMaterialVariant;
@@ -2007,6 +2009,7 @@ export interface GameProject {
   inventoryConfig?: GameInventoryConfig;
   postProcessing?: PostProcessingConfig;
   storybook?: StorybookConfig;
+  customMonsters?: MonsterBlueprint[];
   coverTagline: string;
   difficulty: 'Easy' | 'Normal' | 'Tricky';
   published: boolean;
@@ -3192,6 +3195,46 @@ export interface CharacterFacialHairConfig {
   beard: CharacterBeardConfig;
   sideburns: CharacterSideburnsConfig;
   stubble: CharacterStubbleConfig;
+}
+
+// ============================================================================
+// Quadruped / Multi-Legged Animal & Fantastical Monster Builder
+// ============================================================================
+
+export type MonsterHeadStyle = 'wolf' | 'dragon' | 'demon' | 'dino' | 'fluffy' | 'spider';
+export type MonsterHornStyle = 'none' | 'twinHorns' | 'ramCurl' | 'stagAntlers' | 'crownSpikes' | 'rhinoHorn';
+export type MonsterWingStyle = 'none' | 'dragonBat' | 'feathered' | 'fairyInsect';
+export type MonsterTailStyle = 'none' | 'bushy' | 'dragonSpiked' | 'club' | 'stinger' | 'shortStub';
+export type MonsterRole = 'baddie' | 'npc' | 'buddy';
+
+export interface MonsterBlueprint {
+  id: string;
+  name: string;
+  presetId?: string;
+  role: MonsterRole;
+  /** Number of leg pairs: 2 = 4 legs, 3 = 6 legs, 4 = 8 legs */
+  legPairs: 2 | 3 | 4;
+  /** Number of heads: 1, 2, or 3 */
+  headCount: 1 | 2 | 3;
+  headStyle: MonsterHeadStyle;
+  hornStyle: MonsterHornStyle;
+  wingStyle: MonsterWingStyle;
+  canFly: boolean;
+  tailStyle: MonsterTailStyle;
+  spineSpikes: boolean;
+  bodyLength: number; // 0.75..1.65
+  bodyWidth: number; // 0.75..1.55
+  legHeight: number; // 0.65..1.55
+  scale: number; // 0.65..2.2
+  bodyColor: string;
+  bellyColor: string;
+  accentColor: string;
+  eyeColor: string;
+  wingColor: string;
+  isBoss?: boolean;
+  speed?: number;
+  health?: number;
+  dialogue?: string;
 }
 
 

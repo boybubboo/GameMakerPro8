@@ -2641,6 +2641,27 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
               </button>
             )}
 
+            {(currentEntity.monsterConfig ||
+              (!selectedEntityCustom && (currentEntity.kind === 'baddie' || currentEntity.kind === 'npc'))) && (
+              <button
+                type="button"
+                onClick={() =>
+                  store.openMonsterMaker({
+                    entityId: currentEntity.id,
+                    blueprint: currentEntity.monsterConfig ?? undefined,
+                  })
+                }
+                className="w-full py-2 rounded-xl bg-[#EC4899]/15 text-[#EC4899] hover:bg-[#EC4899]/25 text-xs font-extrabold inline-flex items-center justify-center gap-1.5"
+              >
+                <Sparkles size={13} />
+                <span>
+                  {currentEntity.monsterConfig
+                    ? 'Edit in Monster Studio'
+                    : 'Make 4-Legged Animal / Monster'}
+                </span>
+              </button>
+            )}
+
             {currentEntity.kind !== 'fxEmitter' && (envType === 'openWorld' || envType === 'castle') && (
               <button
                 type="button"

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, MessageCircle, Paintbrush, PanelBottom, Plus, SlidersHorizontal, Trash2, Upload, User } from 'lucide-react';
+import { Box, MessageCircle, Paintbrush, PanelBottom, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, User } from 'lucide-react';
 import {
   getChatFontOption,
   resolveChatBubbleStyle,
@@ -156,6 +156,15 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
           >
             <Plus size={14} />
             <span>Add something</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => store.openMonsterMaker()}
+            className="w-full py-2.5 rounded-xl bg-[#EC4899]/15 text-[#EC4899] text-xs font-extrabold hover:bg-[#EC4899]/25 inline-flex items-center justify-center gap-1.5"
+          >
+            <Sparkles size={14} />
+            <span>Design 4-Legged Monster</span>
           </button>
         </div>
       </aside>
@@ -477,15 +486,76 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                 {EntitySectionMeta.find((s) => s.id === selectedSection)?.blurb}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowingAdd(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#7C5CFF]/15 text-[#7C5CFF] text-xs font-bold"
-            >
-              <Plus size={13} />
-              <span>Add</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => store.openMonsterMaker()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#EC4899]/15 text-[#EC4899] hover:bg-[#EC4899]/25 text-xs font-extrabold"
+              >
+                <Sparkles size={13} />
+                <span>Monster Studio</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowingAdd(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#7C5CFF]/15 text-[#7C5CFF] text-xs font-bold"
+              >
+                <Plus size={13} />
+                <span>Add</span>
+              </button>
+            </div>
           </div>
+
+          {(currentProject.customMonsters?.length ?? 0) > 0 && selectedSection === 'cast' && (
+            <div className="p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0]">
+                  Saved Animals &amp; Monsters
+                </span>
+                <button
+                  type="button"
+                  onClick={() => store.openMonsterMaker()}
+                  className="text-[11px] font-bold text-[#EC4899] hover:underline"
+                >
+                  + Create New
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(currentProject.customMonsters ?? []).map((mon) => (
+                  <div
+                    key={mon.id}
+                    className="flex items-center gap-2 pl-2 pr-1.5 py-1.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08]"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        store.openMonsterMaker({ blueprint: mon });
+                      }}
+                      className="text-left hover:text-[#EC4899] transition-colors"
+                      title="Edit monster design"
+                    >
+                      <div className="text-xs font-bold leading-tight">{mon.name}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-[#949BB0]">
+                        {mon.legPairs * 2}L · {mon.headCount}H{mon.canFly ? ' · Flies' : ''}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        store.spawnMonsterEntity(mon);
+                        setSelectedSection('cast');
+                        setFocusedTarget('entity');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-[#7C5CFF]/15 text-[#7C5CFF] hover:bg-[#7C5CFF]/25 text-[10px] font-extrabold"
+                      title="Place into level"
+                    >
+                      + Place
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {sectionEntities.length === 0 ? (
             <MakerCard>
@@ -563,6 +633,16 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
 
       {showingAdd && (
         <AddEntityModal
+          savedMonsters={currentProject.customMonsters}
+          onOpenMonsterStudio={() => {
+            setShowingAdd(false);
+            store.openMonsterMaker();
+          }}
+          onSpawnMonster={(mon) => {
+            store.spawnMonsterEntity(mon);
+            setSelectedSection('cast');
+            setFocusedTarget('entity');
+          }}
           onClose={() => setShowingAdd(false)}
           onAdd={(kind, name) => {
             const added = store.addEntity(kind, name);
@@ -762,6 +842,26 @@ const EntityInspector: React.FC<{
               {boundAsset?.category === 'character'
                 ? 'Edit in Character Maker'
                 : 'Create in Character Maker'}
+            </span>
+          </button>
+        )}
+
+        {(entity.kind === 'npc' || entity.kind === 'baddie') && (
+          <button
+            type="button"
+            onClick={() =>
+              store.openMonsterMaker({
+                entityId: entity.id,
+                blueprint: entity.monsterConfig ?? undefined,
+              })
+            }
+            className="w-full py-2 rounded-xl bg-[#EC4899]/15 hover:bg-[#EC4899]/25 text-[#EC4899] text-xs font-extrabold inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+          >
+            <Sparkles size={13} />
+            <span>
+              {entity.monsterConfig
+                ? 'Edit Monster Parts & Wings'
+                : 'Make 4-Legged Animal / Monster'}
             </span>
           </button>
         )}

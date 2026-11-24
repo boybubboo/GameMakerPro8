@@ -187,6 +187,11 @@ import {
   type ParachuteBlanketRig,
 } from '../../three/proceduralModels';
 import {
+  animateQuadrupedMonster,
+  type QuadrupedAnimState,
+  type QuadrupedMonsterRig,
+} from '../../three/quadrupedMonsterBuilder';
+import {
   attachEquipmentToCustomModel,
   syncHeroEquipmentVisuals,
   type HeroEquipmentHandles,
@@ -427,6 +432,7 @@ interface RuntimeEntity {
   mesh: THREE.Group;
   customInst: CustomModelInstance | null;
   baddieRig: BaddieRig | null;
+  quadrupedRig: QuadrupedMonsterRig | null;
   customFlashMats: Array<{ emissive: THREE.Color; emissiveIntensity: number }>;
   hpBar: EnemyHealthBar | null;
   x: number;
@@ -507,6 +513,8 @@ interface RuntimeEntity {
   >;
   entityYaw?: number;
   entityScale?: number;
+  npcWanderAngle?: number;
+  npcWanderTimer?: number;
 }
 
 export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
@@ -2545,6 +2553,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         scene.add(mesh);
 
         const baddieRig = (mesh.userData.baddieRig as BaddieRig | undefined) ?? null;
+        const quadrupedRig = (mesh.userData.quadrupedRig as QuadrupedMonsterRig | undefined) ?? null;
         const customFlashMats: Array<{ emissive: THREE.Color; emissiveIntensity: number }> = [];
         const floatSpinMeshes: THREE.Object3D[] = [];
         const torchFlames: Array<{ mesh: THREE.Object3D; baseY: number; phase: number }> = [];
@@ -2589,12 +2598,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         if (ent.kind === 'baddie' && baddieRig && ent.materialVariant) {
           baddieRig.flashMaterials = customFlashMats as unknown as THREE.MeshStandardMaterial[];
         }
+        if (ent.kind === 'baddie' && quadrupedRig && ent.materialVariant) {
+          quadrupedRig.flashMaterials = customFlashMats as unknown as THREE.MeshStandardMaterial[];
+        }
 
         const maxHp = Math.max(1, ent.health);
         let hpBar: EnemyHealthBar | null = null;
         if (ent.kind === 'baddie') {
           let barHeight = ent.isBoss ? 2.68 : baddieRig?.isFlyer ? 2.15 : 1.92;
-          if (!baddieRig) {
+          if (quadrupedRig) {
+            barHeight = Math.max(1.85, quadrupedRig.topHeight + (quadrupedRig.canFly ? 1.4 : 0.45));
+          } else if (!baddieRig) {
             const box = new THREE.Box3().setFromObject(mesh);
             const modelH = box.max.y - wy;
             if (Number.isFinite(modelH) && modelH > 0.4) {
@@ -2654,6 +2668,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           mesh,
           customInst,
           baddieRig,
+          quadrupedRig,
           customFlashMats,
           hpBar,
           x: wx,
@@ -7220,6 +7235,94 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 rt.mesh.rotation.x = THREE.MathUtils.damp(rt.mesh.rotation.x, 0, 12, dt);
                 rt.mesh.rotation.z = THREE.MathUtils.damp(rt.mesh.rotation.z, 0, 12, dt);
               }
+              let npcWanderMoving = false;
+              if (
+                !skitAnimating &&
+                rt.quadrupedRig &&
+                !rt.isBuddy &&
+                (!rt.critterAttitude || rt.critterAttitude === 'none')
+              ) {
+                if (dist < 3.6) {
+                  const gYaw = Math.atan2(heroX - rt.x, heroZ - rt.z);
+                  const yDiff = Math.atan2(
+                    Math.sin(gYaw - rt.mesh.rotation.y),
+                    Math.cos(gYaw - rt.mesh.rotation.y)
+                  );
+                  rt.mesh.rotation.y += yDiff * Math.min(1, dt * 6);
+                } else {
+                  rt.npcWanderTimer = (rt.npcWanderTimer ?? 0) - dt;
+                  if (rt.npcWanderTimer <= 0) {
+                    const homeDist = Math.hypot(rt.x - rt.startX, rt.z - rt.startZ);
+                    if (homeDist > 3.8) {
+                      rt.npcWanderAngle = Math.atan2(rt.startX - rt.x, rt.startZ - rt.z);
+                    } else {
+                      rt.npcWanderAngle = (rt.npcWanderAngle ?? Math.random() * Math.PI * 2) + (Math.random() - 0.5) * 2.2;
+                    }
+                    rt.npcWanderTimer = 2.0 + Math.random() * 2.8;
+                  }
+                  const ang = rt.npcWanderAngle ?? 0;
+                  const moveSpd = Math.max(1.2, Math.min(3.5, rt.speed * 0.55));
+                  const [wxN, wzN] = resolveHorizontalCollision(
+                    activeLevel,
+                    rt.x + Math.sin(ang) * moveSpd * dt,
+                    rt.z + Math.cos(ang) * moveSpd * dt,
+                    0.5,
+                    true,
+                    collisionCtx
+                  );
+                  if (Math.hypot(wxN - rt.x, wzN - rt.z) > 0.002) {
+                    rt.x = wxN;
+                    rt.z = wzN;
+                    npcWanderMoving = true;
+                  } else {
+                    rt.npcWanderTimer = 0;
+                  }
+                  const yDiff = Math.atan2(
+                    Math.sin(ang - rt.mesh.rotation.y),
+                    Math.cos(ang - rt.mesh.rotation.y)
+                  );
+                  rt.mesh.rotation.y += yDiff * Math.min(1, dt * 4.5);
+                }
+                rt.mesh.position.set(rt.x, sampleLevelHeight(activeLevel, rt.x, rt.z) + (rt.elevationY ?? 0), rt.z);
+              }
+              if (rt.quadrupedRig) {
+                const emCelebratesQ =
+                  Boolean(rt.skitEmote) &&
+                  (rt.skitEmote === 'cheer' ||
+                    rt.skitEmote === 'dance' ||
+                    rt.skitEmote === 'laugh');
+                const qMoving = buddyMoving || critterMoving || npcWanderMoving || Boolean(rt.skitMoving);
+                if (qMoving) {
+                  rt.walkPhase += dt * (buddyMoving ? 8.2 : 5.4);
+                }
+                const fwdX = Math.sin(rt.mesh.rotation.y);
+                const fwdZ = Math.cos(rt.mesh.rotation.y);
+                const hAhead = sampleLevelHeight(activeLevel, rt.x + fwdX * 0.55, rt.z + fwdZ * 0.55);
+                const hBehind = sampleLevelHeight(activeLevel, rt.x - fwdX * 0.55, rt.z - fwdZ * 0.55);
+                const slopePitch = rt.quadrupedRig.canFly
+                  ? 0
+                  : THREE.MathUtils.clamp(-Math.atan2(hAhead - hBehind, 1.1), -0.45, 0.45);
+                const qState: QuadrupedAnimState =
+                  tavernCelebrated || emCelebratesQ || rt.critterCelebrateTimer > 0
+                    ? 'celebrate'
+                    : rt.quadrupedRig.canFly
+                    ? 'fly'
+                    : buddyMoving
+                    ? 'run'
+                    : qMoving
+                    ? 'walk'
+                    : 'idle';
+                animateQuadrupedMonster(
+                  rt.quadrupedRig,
+                  dt,
+                  gameElapsed + (rt.x + rt.z) * 0.15,
+                  rt.walkPhase,
+                  buddyMoving ? 0.85 : qMoving ? 0.52 : 0,
+                  qState,
+                  0,
+                  slopePitch
+                );
+              }
               if (rt.creatureRefs) {
                 const emCelebrates =
                   Boolean(rt.skitEmote) &&
@@ -7420,7 +7523,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   const lungeSpeed = rt.isBoss ? 9.2 : 8.4;
                   rt.vx += rt.attackDirX * lungeSpeed;
                   rt.vz += rt.attackDirZ * lungeSpeed;
-                  if (rt.baddieRig?.isFlyer) {
+                  if (rt.baddieRig?.isFlyer || rt.quadrupedRig?.canFly) {
                     rt.vy = -1.2;
                   }
                   AudioEngine.playSound('whoosh');
@@ -7678,6 +7781,55 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 } else {
                   bRig.slashArc.visible = false;
                 }
+              } else if (rt.quadrupedRig) {
+                const qRig = rt.quadrupedRig;
+                const fwdX = Math.sin(rt.mesh.rotation.y);
+                const fwdZ = Math.cos(rt.mesh.rotation.y);
+                const hAhead = sampleLevelHeight(activeLevel, rt.x + fwdX * 0.6, rt.z + fwdZ * 0.6);
+                const hBehind = sampleLevelHeight(activeLevel, rt.x - fwdX * 0.6, rt.z - fwdZ * 0.6);
+                const slopePitch = qRig.canFly
+                  ? 0
+                  : THREE.MathUtils.clamp(-Math.atan2(hAhead - hBehind, 1.2), -0.45, 0.45);
+                const windupTotal = rt.isBoss ? 0.58 : 0.46;
+                let qState: QuadrupedAnimState = 'idle';
+                let qProg = 0;
+                if (rt.aiState === 'dying') {
+                  qState = 'dying';
+                } else if (rt.aiState === 'stagger') {
+                  qState = 'stagger';
+                } else if (rt.aiState === 'windup') {
+                  qState = 'windup';
+                  qProg = 1 - Math.max(0, rt.stateTimer / windupTotal);
+                } else if (rt.aiState === 'strike') {
+                  qState = 'strike';
+                  qProg = 1 - Math.max(0, rt.stateTimer / 0.24);
+                } else if (qRig.canFly) {
+                  qState = 'fly';
+                } else if (movingBaddie && rt.aiState === 'chase') {
+                  qState = 'run';
+                } else if (movingBaddie) {
+                  qState = 'walk';
+                }
+                const spdNorm = rt.aiState === 'chase' ? 0.92 : movingBaddie ? 0.54 : 0;
+                animateQuadrupedMonster(
+                  qRig,
+                  dt,
+                  gameElapsed,
+                  rt.walkPhase,
+                  spdNorm,
+                  qState,
+                  qProg,
+                  slopePitch,
+                  rt.recoilPitch,
+                  rt.recoilRoll
+                );
+                if (rt.aiState === 'strike') {
+                  qRig.slashArc.visible = true;
+                  qRig.slashArc.rotation.y = 0.7 - qProg * 1.5;
+                  qRig.slashMat.opacity = Math.sin(qProg * Math.PI) * 0.75;
+                } else {
+                  qRig.slashArc.visible = false;
+                }
               } else {
                 // Custom GLB baddie fallback motion & recoil tilt
                 rt.mesh.rotation.x = THREE.MathUtils.damp(rt.mesh.rotation.x, rt.recoilPitch, 14, dt);
@@ -7692,7 +7844,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               }
 
               // Hit-flash (bright white-gold) and Attack-Windup telegraph glow (pulsing amber-red)
-              const flashMats = bRig ? bRig.flashMaterials : rt.customFlashMats;
+              const flashMats = bRig
+                ? bRig.flashMaterials
+                : rt.quadrupedRig
+                ? rt.quadrupedRig.flashMaterials
+                : rt.customFlashMats;
               if (flashMats.length > 0) {
                 if (rt.hitFlashTimer > 0) {
                   const f = Math.min(1, rt.hitFlashTimer / 0.14);
@@ -7737,7 +7893,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
                 if (bar.opacity > 0.02) {
                   bar.group.visible = true;
-                  const flyHover = bRig?.isFlyer ? Math.sin(gameElapsed * 3.5 + rt.walkPhase) * 0.14 : 0;
+                  const flyHover = bRig?.isFlyer
+                    ? Math.sin(gameElapsed * 3.5 + rt.walkPhase) * 0.14
+                    : rt.quadrupedRig?.canFly
+                    ? 1.15 + Math.sin(gameElapsed * 3.4) * 0.16
+                    : 0;
                   bar.group.position.set(rt.x, baseY + rt.yOffset + bar.heightOffset + flyHover, rt.z);
                   bar.fillPivot.visible = hpRatio > 0.001;
                   bar.fillPivot.scale.x = Math.max(0.0001, hpRatio);

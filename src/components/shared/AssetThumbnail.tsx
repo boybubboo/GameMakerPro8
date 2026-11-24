@@ -13,7 +13,7 @@ export interface AssetThumbnailProps {
   /** Built-in entity kind to preview as a 3D thumbnail */
   kind?: EntityKind;
   /** Optional entity instance (used for boss/platform/name variant hints) */
-  entity?: Pick<LevelEntity, 'kind' | 'name' | 'isBoss' | 'platformPreset'>;
+  entity?: Pick<LevelEntity, 'kind' | 'name' | 'isBoss' | 'platformPreset' | 'monsterConfig'>;
   /** Custom uploaded GLB asset metadata (takes precedence over built-in kind if present) */
   customAsset?: CustomAssetMeta | null;
   /** Hero rig appearance preview (takes precedence when no customAsset is provided) */
@@ -63,6 +63,7 @@ export const AssetThumbnail: React.FC<AssetThumbnailProps> = ({
       isBoss: entity?.isBoss,
       platformPreset: entity?.platformPreset,
       name: entity?.name,
+      monsterConfig: entity?.monsterConfig,
     });
   }
 

@@ -65,6 +65,7 @@ import type {
   LevelEntity,
   LogicWorkspaceMode,
   MakerIssue,
+  MonsterBlueprint,
   MotionStudioSection,
   ObjectInteractionAttributeId,
   ObjectInteractionCalibration,
@@ -597,6 +598,9 @@ export function useMakerStore() {
   const [treeMakerOpen, setTreeMakerOpen] = useState(false);
   const [treeMakerTargetAssetId, setTreeMakerTargetAssetId] = useState<string | null>(null);
   const [treeMakerInitialSpecies, setTreeMakerInitialSpecies] = useState<TreeSpeciesType | null>(null);
+  const [monsterMakerOpen, setMonsterMakerOpen] = useState(false);
+  const [monsterMakerTargetEntityId, setMonsterMakerTargetEntityId] = useState<string | null>(null);
+  const [monsterMakerInitialBlueprint, setMonsterMakerInitialBlueprint] = useState<MonsterBlueprint | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playModalOpen, setPlayModalOpen] = useState(false);
   const [playFromPoint, setPlayFromPoint] = useState<BoardPoint | null>(null);
@@ -2016,6 +2020,52 @@ export function useMakerStore() {
       return entity;
     },
     [customAssets, updateLevel]
+  );
+
+  const saveCustomMonster = useCallback(
+    (bp: MonsterBlueprint) => {
+      updateProject(`save monster ${bp.name}`, (proj) => {
+        const list = proj.customMonsters ?? [];
+        const idx = list.findIndex((m) => m.id === bp.id);
+        const nextList =
+          idx >= 0 ? list.map((m, i) => (i === idx ? bp : m)) : [...list, bp];
+        return { ...proj, customMonsters: nextList };
+      });
+    },
+    [updateProject]
+  );
+
+  const spawnMonsterEntity = useCallback(
+    (bp: MonsterBlueprint, position?: BoardPoint) => {
+      const pos = position ?? {
+        x: 0.35 + Math.random() * 0.3,
+        y: 0.35 + Math.random() * 0.3,
+      };
+      const kind: EntityKind = bp.role === 'baddie' ? 'baddie' : 'npc';
+      const entity = createEntity(kind, bp.name, pos.x, pos.y, {
+        isBuddy: bp.role === 'buddy',
+        isBoss: Boolean(bp.isBoss),
+        brain: bp.canFly ? 'Flyer' : bp.role === 'baddie' ? 'Chaser' : 'Walker',
+        speed: bp.speed ?? 4,
+        health: bp.health ?? (bp.role === 'baddie' ? 5 : 4),
+        dialogue:
+          bp.dialogue ??
+          (bp.role === 'baddie'
+            ? 'Grrrr! Look out!'
+            : bp.role === 'buddy'
+            ? 'I will travel beside you!'
+            : 'Nice day to trot around the island!'),
+        monsterConfig: bp,
+      });
+      updateLevel(`place ${bp.name}`, (lvl) => ({
+        ...lvl,
+        entities: [...lvl.entities, entity],
+      }));
+      setSelectedSection('cast');
+      setSelectedEntityID(entity.id);
+      return entity;
+    },
+    [updateLevel]
   );
 
   const placeWorldPointBoardHelper = useCallback(
@@ -3762,9 +3812,26 @@ export function useMakerStore() {
       setObjectMakerOpen(false);
       setPlantMakerOpen(false);
       setCharacterMakerOpen(false);
+      setMonsterMakerOpen(false);
       setSelectedTab('world');
       setTreeMakerOpen(true);
     },
+    monsterMakerOpen,
+    setMonsterMakerOpen,
+    monsterMakerTargetEntityId,
+    monsterMakerInitialBlueprint,
+    openMonsterMaker: (opts?: { entityId?: string | null; blueprint?: MonsterBlueprint | null }) => {
+      setMonsterMakerTargetEntityId(opts?.entityId ?? null);
+      setMonsterMakerInitialBlueprint(opts?.blueprint ?? null);
+      setShowingAssetVault(false);
+      setObjectMakerOpen(false);
+      setPlantMakerOpen(false);
+      setCharacterMakerOpen(false);
+      setTreeMakerOpen(false);
+      setMonsterMakerOpen(true);
+    },
+    saveCustomMonster,
+    spawnMonsterEntity,
     toggleFavoriteCustomAsset,
     duplicateCustomAsset,
     isPlaying,

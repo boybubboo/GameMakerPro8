@@ -43,6 +43,7 @@ import { ExportProjectZipModal } from './ExportProjectZipModal';
 import { MakerIcon } from './IconMap';
 import { IdeasModal } from './IdeasModal';
 import { ThemeToggle } from './MakerUI';
+import { MonsterBuilderModal } from './MonsterBuilderModal';
 import { PersistentMinimapHUD } from './PersistentMinimapHUD';
 import { PostProcessingMenuModal } from './PostProcessingMenuModal';
 import { SavePresetsModal } from './SavePresetsModal';
@@ -280,6 +281,13 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
                         Icon: User,
                         color: '#A855F7',
                         action: () => store.openCharacterMaker(),
+                      },
+                      {
+                        label: 'Animal & Monster Studio',
+                        desc: '4/6/8 legs, multi-heads, horns & wings',
+                        Icon: Sparkles,
+                        color: '#EC4899',
+                        action: () => store.openMonsterMaker(),
                       },
                       {
                         label: 'Tree Maker',
@@ -635,6 +643,15 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
             store={store}
             initialAssetId={store.characterMakerTargetAssetId}
             onClose={() => store.setCharacterMakerOpen(false)}
+          />
+        )}
+
+        {store.monsterMakerOpen && (
+          <MonsterBuilderModal
+            store={store}
+            initialBlueprint={store.monsterMakerInitialBlueprint}
+            editingEntityId={store.monsterMakerTargetEntityId}
+            onClose={() => store.setMonsterMakerOpen(false)}
           />
         )}
 

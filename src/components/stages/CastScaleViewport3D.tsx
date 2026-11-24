@@ -25,6 +25,10 @@ import {
   setupSceneEnvironment,
 } from '../../three/islandScene';
 import { buildEntityMesh, buildHeroModel } from '../../three/proceduralModels';
+import {
+  animateQuadrupedMonster,
+  type QuadrupedMonsterRig,
+} from '../../three/quadrupedMonsterBuilder';
 import { getTerrainTextureAtlas } from '../../three/proceduralTextures';
 import {
   createDetailedPineTierGeometry,
@@ -626,7 +630,24 @@ export const CastScaleViewport3D: React.FC<CastScaleViewport3DProps> = ({
       } else {
         const built = buildEntityMesh({ ...selectedEntity, scale: 1, rotation: 0 });
         applyVisualStyleToObject(built, style);
-        setPreviewObject(built, null);
+        const qRig = built.userData.quadrupedRig as QuadrupedMonsterRig | undefined;
+        let monElapsed = 0;
+        setPreviewObject(
+          built,
+          qRig
+            ? (dt) => {
+                monElapsed += dt;
+                animateQuadrupedMonster(
+                  qRig,
+                  dt,
+                  monElapsed,
+                  monElapsed * 4.4,
+                  qRig.canFly ? 0.5 : 0.45,
+                  qRig.canFly ? 'fly' : 'walk'
+                );
+              }
+            : null
+        );
       }
     }
 
@@ -647,6 +668,7 @@ export const CastScaleViewport3D: React.FC<CastScaleViewport3DProps> = ({
     selectedEntity?.buildingBlock,
     selectedEntity?.mechTemplate,
     selectedEntity?.canopyTree,
+    selectedEntity?.monsterConfig,
     selectedEntity?.vertexPaintStrokes,
     boundEntityAsset,
   ]);

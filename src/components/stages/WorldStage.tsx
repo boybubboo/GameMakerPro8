@@ -2155,6 +2155,7 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                   store.objectMakerOpen ||
                   store.plantMakerOpen ||
                   store.characterMakerOpen ||
+                  store.monsterMakerOpen ||
                   store.vertexPaintTarget !== null ||
                   store.attributeModifierTarget !== null ||
                   showingMap ||

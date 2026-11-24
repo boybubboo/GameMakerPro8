@@ -12,6 +12,7 @@ import {
 import { buildFxEmitterFallbackGroup } from './fxEmitterRuntime';
 import { DUNGEON_TRAP_STYLE_META } from '../services/DungeonGenerator';
 import { buildBuildingBlockMesh, buildModularDoorMesh } from './buildingBlocks';
+import { buildQuadrupedMonsterMesh } from './quadrupedMonsterBuilder';
 
 export interface CreatureAnimRefs {
   creatureType: CreatureBodyId;
@@ -2200,6 +2201,15 @@ export function buildEntityMesh(entity: LevelEntity): THREE.Group {
     group.add(buildBuildingBlockMesh(entity.buildingBlock, bbScale, blockSeed));
     group.rotation.y = (entity.rotation * Math.PI) / 180;
     group.scale.setScalar(bbScale);
+    return group;
+  }
+
+  if (entity.monsterConfig) {
+    const monMesh = buildQuadrupedMonsterMesh(entity.monsterConfig);
+    group.add(monMesh);
+    group.userData.quadrupedRig = monMesh.userData.quadrupedRig;
+    group.rotation.y = (entity.rotation * Math.PI) / 180;
+    group.scale.setScalar(Math.max(0.25, Math.min(3.5, entity.scale)));
     return group;
   }
 
