@@ -336,7 +336,7 @@ function collectRegionSamples(
 
     const hair = isHairNode(mesh);
     const skinned = mesh as THREE.SkinnedMesh;
-    const step = Math.max(1, Math.floor(posAttr.count / 2400));
+    const step = Math.max(1, Math.floor(posAttr.count / 3600));
 
     if (
       skinned.isSkinnedMesh &&
@@ -364,16 +364,21 @@ function collectRegionSamples(
         const region = domBone ? boneRegionMap.get(domBone) : undefined;
         if (!region) continue;
 
+        _v.fromBufferAttribute(posAttr, i);
         skinned.applyBoneTransform(i, _v);
         _v.applyMatrix4(skinned.matrixWorld);
-        pushSample(region, hair, _v.clone());
+        if (Number.isFinite(_v.x) && Number.isFinite(_v.y) && Number.isFinite(_v.z)) {
+          pushSample(region, hair, _v.clone());
+        }
       }
     } else {
       const region = findAncestorRegion(mesh);
       if (!region) return;
       for (let i = 0; i < posAttr.count; i += step) {
         _v.fromBufferAttribute(posAttr, i).applyMatrix4(mesh.matrixWorld);
-        pushSample(region, hair, _v.clone());
+        if (Number.isFinite(_v.x) && Number.isFinite(_v.y) && Number.isFinite(_v.z)) {
+          pushSample(region, hair, _v.clone());
+        }
       }
     }
   });
@@ -954,21 +959,40 @@ export function attachEquipmentToCustomModel(
 
   // 3. Right-Hand Grip Anchor (Sword, Axe, Fishing Pole, Torch, Generic Held Item)
   const handTargetBone = bones.rightHand ?? bones.rightLowerArm ?? heroCustom.scaledRoot;
+  const hasDedicatedHandBone = Boolean(bones.rightHand && bones.rightHand !== bones.rightLowerArm);
   const gripPos = new THREE.Vector3();
-  if (samples.rightHandPts.length >= 4) {
+  if (samples.rightHandPts.length >= 4 && hasDedicatedHandBone && bones.rightHand) {
     const centroid = new THREE.Vector3();
     for (const pt of samples.rightHandPts) centroid.add(pt);
     centroid.divideScalar(samples.rightHandPts.length);
 
-    if (bones.rightHand) {
-      bones.rightHand.getWorldPosition(_v2);
-      gripPos.copy(_v2).lerp(centroid, 0.65);
-    } else {
-      gripPos.copy(centroid);
+    bones.rightHand.getWorldPosition(_v2);
+    const offset = centroid.clone().sub(_v2);
+    const maxHandOffset = 0.22 * heroScale;
+    if (offset.length() > maxHandOffset) {
+      offset.setLength(maxHandOffset);
     }
+    gripPos.copy(_v2).addScaledVector(offset, 0.65);
+  } else if (samples.rightHandPts.length >= 4 && !bones.rightHand) {
+    const centroid = new THREE.Vector3();
+    for (const pt of samples.rightHandPts) centroid.add(pt);
+    centroid.divideScalar(samples.rightHandPts.length);
+    gripPos.copy(centroid);
   } else if (bones.rightHand) {
     bones.rightHand.getWorldPosition(gripPos);
-    if (bones.rightLowerArm && bones.rightLowerArm !== bones.rightHand) {
+    if (!hasDedicatedHandBone && samples.rightHandPts.length >= 4) {
+      // Forearm-only rig (no wrist bone): pick distal tip furthest from elbow
+      let furthest = samples.rightHandPts[0];
+      let bestDistSq = 0;
+      for (const pt of samples.rightHandPts) {
+        const dSq = pt.distanceToSquared(gripPos);
+        if (dSq > bestDistSq) {
+          bestDistSq = dSq;
+          furthest = pt;
+        }
+      }
+      gripPos.lerp(furthest, 0.88);
+    } else if (bones.rightLowerArm && bones.rightLowerArm !== bones.rightHand) {
       bones.rightLowerArm.getWorldPosition(_v2);
       const dir = gripPos.clone().sub(_v2);
       if (dir.lengthSq() > 1e-5) {

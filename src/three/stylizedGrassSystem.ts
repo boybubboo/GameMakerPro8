@@ -87,7 +87,7 @@ interface BiomeGrassPalette {
   densityBias: number;
 }
 
-function getBiomeGrassPalette(
+export function getBiomeGrassPalette(
   biome: BiomeId,
   biomeGroundHex: string,
   biomeDetailHex: string
@@ -177,7 +177,7 @@ function getBiomeGrassPalette(
  * Builds a stylized curved grass blade geometry with a subtle center V-fold ridge
  * for near LOD (7 triangles, 3 vertical bend segments).
  */
-function createNearBladeGeometry(widthScale = 1.0): THREE.BufferGeometry {
+export function createNearBladeGeometry(widthScale = 1.0): THREE.BufferGeometry {
   const geo = new THREE.BufferGeometry();
   const hw = 0.5 * widthScale;
 
@@ -688,7 +688,14 @@ function createGrassNodeMaterial(opts: {
     const baseCell = floor(chunkOriginXZ.div(uCellSpacing).add(0.5)).add(aCellOffset);
     const hashSeed = baseCell.add(vec2(aBladeSub.mul(37.13), aBladeSub.mul(91.7)));
     const jitter = gHash22Tsl(hashSeed).sub(0.5);
-    const worldXZ = baseCell.add(0.5).add(jitter.mul(0.92)).mul(uCellSpacing);
+    const rawWorldXZ = baseCell.add(0.5).add(jitter.mul(0.92)).mul(uCellSpacing);
+    // Organic tuft cluster cell (~1.6m patches) — pulls blades toward clump centers as tuftClumpiness rises
+    const clumpGridScale = float(0.62);
+    const clumpCell = floor(rawWorldXZ.mul(clumpGridScale));
+    const clumpHash = gHash22Tsl(clumpCell);
+    const clumpCenterXZ = clumpCell.add(0.22).add(clumpHash.mul(0.56)).div(clumpGridScale);
+    const clumpPull = clamp(uTuftClumpiness, 0.0, 1.0).mul(0.58);
+    const worldXZ = mix(rawWorldXZ, clumpCenterXZ, clumpPull);
 
     const clipPos = vec4(2.0, 2.0, 2.0, 1.0).toVar();
 
@@ -740,11 +747,6 @@ function createGrassNodeMaterial(opts: {
         If(inClip, () => {
           const clumpNoise = gNoise2DTsl(worldXZ.mul(0.14));
           const bladeRnd = gHash21Tsl(hashSeed.add(vec2(43.1, 88.4)));
-
-          // Organic tuft cluster cell (~2.2m patches) for cohesive clump lean & height correlation
-          const clumpCell = floor(worldXZ.mul(0.45));
-          const clumpHash = gHash22Tsl(clumpCell);
-          const clumpHeightMul = float(0.84).add(clumpHash.y.mul(0.34));
 
           // Break up circular LOD arcs with low-frequency meadow patch wobble + per-blade scatter
           const organicDist = distXZ
@@ -1119,7 +1121,7 @@ function createGrassNodeMaterial(opts: {
 const GRASS_CHUNK_SIZE = 18.0;
 const TRAIL_TEX_SIZE = 256;
 
-interface LodTierSpec {
+export interface LodTierSpec {
   nearCellsPerSide: number;
   nearSpacing: number;
   nearBladesPerCell: number;
@@ -1128,7 +1130,7 @@ interface LodTierSpec {
   farBladesPerCell: number;
 }
 
-function getLodTierSpec(quality: GrassQuality): LodTierSpec {
+export function getLodTierSpec(quality: GrassQuality): LodTierSpec {
   switch (quality) {
     case 'light':
       return {

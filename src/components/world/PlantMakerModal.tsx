@@ -11,6 +11,7 @@ import {
   EyeOff,
   Flower2,
   FolderOpen,
+  Grid3X3,
   Group,
   Layers,
   Leaf,
@@ -19,6 +20,7 @@ import {
   Paintbrush,
   Plus,
   Redo2,
+  RotateCcw,
   RotateCw,
   Save,
   Scaling,
@@ -29,6 +31,7 @@ import {
   Undo2,
   Ungroup,
   Wand2,
+  Wind,
   X,
 } from 'lucide-react';
 import type { MakerStore } from '../../store/useMakerStore';
@@ -70,6 +73,15 @@ import {
   disposeObject3D,
   setupSceneEnvironment,
 } from '../../three/islandScene';
+import {
+  GRASS_MEADOW_PRESETS,
+  GrassSamplePreview,
+  type GrassSampleStats,
+} from '../../three/grassSamplePreview';
+import {
+  createDefaultGrassConfig,
+  resolveGrassConfig,
+} from '../../three/stylizedGrassSystem';
 import { isWebGPUFallbackAdapter } from '../../three/webglUtils';
 import {
   applyVertexPaintStrokesToObject,
@@ -88,6 +100,8 @@ import type {
   CurveGuideConfig,
   CurveGuidePresetId,
   CustomAssetMeta,
+  GrassFieldConfig,
+  GrassQuality,
   ObjectGroupSpec,
   ObjectMakerDoc,
   ObjectPartSpec,
@@ -105,9 +119,11 @@ import { AssetThumbnail } from '../shared/AssetThumbnail';
 export interface PlantMakerModalProps {
   store: MakerStore;
   initialAssetId?: string | null;
+  initialSection?: 'plant' | 'grass';
   onClose: () => void;
 }
 
+type StudioSection = 'plant' | 'grass';
 type StudioToolMode = 'select' | 'translate' | 'rotate' | 'scale';
 type InspectorTab = 'cluster' | 'shape' | 'pattern' | 'paint';
 type CameraPreset = 'threeQuarter' | 'front' | 'top' | 'close';
@@ -206,12 +222,34 @@ function ensureUniquePlantNodeNames(doc: ObjectMakerDoc): ObjectMakerDoc {
 export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
   store,
   initialAssetId = null,
+  initialSection = 'plant',
   onClose,
 }) => {
+  const [studioSection, setStudioSection] = useState<StudioSection>(
+    initialAssetId ? 'plant' : initialSection
+  );
   const [editingAssetId, setEditingAssetId] = useState<string | null>(initialAssetId);
   const [plantName, setPlantName] = useState<string>('Tropical Banana Clump');
   const [assetCategory, setAssetCategory] = useState<AssetCategory>('plant');
   const [doc, setDoc] = useState<ObjectMakerDoc>(() => createStarterPlantDoc());
+
+  // Grass & Meadow Maker sampler state (synced live to currentLevel.grass)
+  const [localGrassFallback, setLocalGrassFallback] = useState<GrassFieldConfig>(() =>
+    createDefaultGrassConfig()
+  );
+  const [grassPatchSize, setGrassPatchSize] = useState<2.5 | 4 | 6>(4);
+  const [grassSeed, setGrassSeed] = useState<number>(1);
+  const [showGrassGuides, setShowGrassGuides] = useState<boolean>(true);
+  const [grassPreviewWind, setGrassPreviewWind] = useState<number>(0.45);
+  const [grassStats, setGrassStats] = useState<GrassSampleStats>({
+    patchSizeM: 4,
+    patchAreaSqM: 16,
+    bladeCount: 50,
+    bladesPerSqM: 3.1,
+    clumpCount: 6,
+    cellSpacingM: 0.818,
+    bladesPerCell: 2,
+  });
 
   // Undo / Redo stacks
   const [undoStack, setUndoStack] = useState<ObjectMakerDoc[]>([]);
@@ -279,6 +317,36 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     setToast(msg);
     window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 2400);
   }, []);
+
+  const currentLevel = store.currentLevel;
+  const grassCfg = useMemo(
+    () => resolveGrassConfig(currentLevel?.grass ?? localGrassFallback),
+    [currentLevel?.grass, localGrassFallback]
+  );
+
+  const patchGrassConfig = useCallback(
+    (patch: Partial<GrassFieldConfig>, recordUndo = false) => {
+      if (store.currentLevel) {
+        store.updateLevel(
+          'adjust grass in Plant Maker',
+          (lvl) => ({
+            ...lvl,
+            grass: {
+              ...resolveGrassConfig(lvl.grass),
+              ...patch,
+            },
+          }),
+          recordUndo
+        );
+      } else {
+        setLocalGrassFallback((prev) => ({
+          ...resolveGrassConfig(prev),
+          ...patch,
+        }));
+      }
+    },
+    [store]
+  );
 
   // Derived selections
   const selectedGroup = useMemo(
@@ -960,6 +1028,11 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     objectRootHolder: THREE.Group;
     curveGroup: THREE.Group;
     selectionBoxGroup: THREE.Group;
+    soilRing: THREE.Mesh;
+    grid: THREE.GridHelper;
+    hemi: THREE.HemisphereLight;
+    keyLight: THREE.DirectionalLight;
+    grassPreview: GrassSamplePreview;
     partMeshes: Map<string, THREE.Mesh>;
     groupNodes: Map<string, THREE.Group>;
     curveHandleMeshes: THREE.Mesh[];
@@ -970,6 +1043,8 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
   } | null>(null);
 
   const latestRef = useRef({
+    studioSection,
+    grassPreviewWind,
     doc,
     toolMode,
     gridSnapStep,
@@ -984,6 +1059,8 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     paintBrush,
   });
   latestRef.current = {
+    studioSection,
+    grassPreviewWind,
     doc,
     toolMode,
     gridSnapStep,
@@ -1062,7 +1139,9 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     const curveGroup = new THREE.Group();
     const selectionBoxGroup = new THREE.Group();
     const multiProxy = new THREE.Group();
-    scene.add(objectRootHolder, curveGroup, selectionBoxGroup, multiProxy);
+    const grassPreview = new GrassSamplePreview();
+    grassPreview.group.visible = latestRef.current.studioSection === 'grass';
+    scene.add(objectRootHolder, curveGroup, selectionBoxGroup, multiProxy, grassPreview.group);
 
     const isCoarsePointer =
       typeof window !== 'undefined' &&
@@ -1097,6 +1176,11 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
       objectRootHolder,
       curveGroup,
       selectionBoxGroup,
+      soilRing,
+      grid,
+      hemi,
+      keyLight,
+      grassPreview,
       partMeshes: new Map<string, THREE.Mesh>(),
       groupNodes: new Map<string, THREE.Group>(),
       curveHandleMeshes: [] as THREE.Mesh[],
@@ -1435,6 +1519,7 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 || studioState.isDraggingGizmo) return;
       const cur = latestRef.current;
+      if (cur.studioSection === 'grass') return;
       const isPaintingNow =
         cur.inspectorTab === 'paint' && cur.paintTool === 'paint' && !cur.spaceOrbiting;
       if (isPaintingNow) {
@@ -1494,6 +1579,12 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (latestRef.current.studioSection === 'grass') {
+        marqueeStart = null;
+        pointerDownClient = null;
+        setMarqueeRect(null);
+        return;
+      }
       if (studioState.paintSession.brushing) {
         const completed = studioState.paintSession.finishStroke(
           studioState.renderer.domElement,
@@ -1702,10 +1793,21 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
       }
     };
 
+    const animStartMs = performance.now();
     const tick = () => {
       if (disposed) return;
       try {
         studioState.controls.update();
+        if (latestRef.current.studioSection === 'grass') {
+          const elapsedSec = (performance.now() - animStartMs) * 0.001;
+          studioState.grassPreview.update(
+            elapsedSec,
+            camera,
+            keyLight,
+            hemi,
+            latestRef.current.grassPreviewWind
+          );
+        }
         renderer.render(scene, camera);
       } catch {
         // tolerate transient frame error
@@ -1796,6 +1898,7 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
       transformControls.detach();
       transformControls.dispose();
       studioState.paintSession.dispose(scene);
+      studioState.grassPreview.dispose();
       studioState.controls.dispose();
       envTex?.dispose();
       disposeObject3D(scene);
@@ -1867,10 +1970,77 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
     });
   }, [curveEnabled, curveCfg, activeCurvePtIdx]);
 
+  // Sync Grass Sample Patch visibility & live uniforms when Grass Maker section is active
+  useEffect(() => {
+    const s = studioRef.current;
+    if (!s) return;
+    const isGrass = studioSection === 'grass';
+
+    s.objectRootHolder.visible = !isGrass;
+    s.curveGroup.visible = !isGrass;
+    s.selectionBoxGroup.visible = !isGrass;
+    s.soilRing.visible = !isGrass;
+    s.grid.visible = !isGrass;
+    s.transformControls.getHelper().visible = !isGrass;
+    s.grassPreview.group.visible = isGrass;
+
+    if (isGrass) {
+      s.transformControls.detach();
+      s.paintSession.hideCursor();
+      const stats = s.grassPreview.sync({
+        config: grassCfg,
+        patchSizeM: grassPatchSize,
+        biome: store.currentLevel?.biome ?? 'meadow',
+        seedOffset: grassSeed,
+        showGuides: showGrassGuides,
+      });
+      setGrassStats(stats);
+    }
+  }, [
+    studioSection,
+    grassCfg,
+    grassPatchSize,
+    grassSeed,
+    showGrassGuides,
+    store.currentLevel?.biome,
+  ]);
+
+  // Frame camera smoothly when switching into Grass Maker
+  useEffect(() => {
+    const s = studioRef.current;
+    if (!s) return;
+    if (studioSection === 'grass') {
+      const dist = grassPatchSize >= 6 ? 4.8 : grassPatchSize <= 2.5 ? 2.45 : 3.45;
+      s.camera.position.set(dist, dist * 0.62, dist * 1.12);
+      s.controls.target.set(0, 0.28, 0);
+      s.controls.update();
+    } else {
+      s.camera.position.set(2.85, 2.05, 3.25);
+      s.controls.target.set(0, 0.55, 0);
+      s.controls.update();
+    }
+  }, [studioSection, grassPatchSize]);
+
   // Sync Selection Bounding Boxes + TransformControls attachment + Paint OrbitControls
   useEffect(() => {
     const s = studioRef.current;
     if (!s || s.isDraggingGizmo) return;
+
+    if (studioSection === 'grass') {
+      s.controls.enabled = true;
+      s.controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+      s.controls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.DOLLY_PAN,
+      };
+      s.transformControls.detach();
+      s.paintSession.hideCursor();
+      return;
+    }
 
     const paintBrushingActive =
       inspectorTab === 'paint' && paintTool === 'paint' && !spaceOrbiting;
@@ -1955,6 +2125,7 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
       tc.detach();
     }
   }, [
+    studioSection,
     doc,
     toolMode,
     gridSnapStep,
@@ -2028,6 +2199,25 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
   const setCameraPreset = (preset: CameraPreset) => {
     const s = studioRef.current;
     if (!s) return;
+    if (studioSection === 'grass') {
+      const scale = grassPatchSize >= 6 ? 1.35 : grassPatchSize <= 2.5 ? 0.72 : 1.0;
+      if (preset === 'front') {
+        s.camera.position.set(0, 0.68 * scale, 3.3 * scale);
+        s.controls.target.set(0, 0.28, 0);
+      } else if (preset === 'top') {
+        s.camera.position.set(0, 5.4 * scale, 0.01);
+        s.controls.target.set(0, 0, 0);
+      } else if (preset === 'close') {
+        s.camera.position.set(1.2, 0.72, 1.35);
+        s.controls.target.set(0, 0.25, 0);
+      } else {
+        s.camera.position.set(3.45 * scale, 2.15 * scale, 3.85 * scale);
+        s.controls.target.set(0, 0.28, 0);
+      }
+      s.controls.update();
+      return;
+    }
+
     if (preset === 'front') {
       s.camera.position.set(0, 1.15, 3.8);
       s.controls.target.set(0, 0.55, 0);
@@ -2090,210 +2280,266 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
       <div className="w-full max-w-[1760px] h-[95dvh] rounded-2xl bg-white dark:bg-[#171A23] text-slate-900 dark:text-[#F3F5FA] border border-slate-200/80 dark:border-white/[0.1] shadow-2xl flex flex-col overflow-hidden">
         {/* TOP STUDIO HEADER */}
         <header className="shrink-0 px-3.5 py-2.5 border-b border-slate-200/80 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-[#171A23]">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
             <div className="w-8 h-8 rounded-xl bg-[#20B46A]/15 text-[#20B46A] flex items-center justify-center shrink-0">
               <Sprout size={17} />
             </div>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-[#20B46A] hidden sm:inline whitespace-nowrap">
-                Plant Maker
-              </span>
-              <input
-                type="text"
-                value={plantName}
-                onChange={(e) => setPlantName(e.target.value)}
-                maxLength={40}
-                placeholder="Plant name…"
-                className="w-40 sm:w-52 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] text-xs font-extrabold focus:outline-none focus:border-[#20B46A]"
-              />
-              <select
-                value={assetCategory}
-                onChange={(e) => setAssetCategory(e.target.value as AssetCategory)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] text-xs font-bold"
+            <span className="text-xs font-extrabold uppercase tracking-wider text-[#20B46A] whitespace-nowrap">
+              Plant Maker
+            </span>
+
+            {/* Section Switcher: Botanical Plants vs Grass & Meadow */}
+            <div className="inline-flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08]">
+              <button
+                type="button"
+                onClick={() => setStudioSection('plant')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors whitespace-nowrap ${
+                  studioSection === 'plant'
+                    ? 'bg-[#20B46A] text-white shadow-sm'
+                    : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+                }`}
               >
-                <option value="plant">Plant</option>
-                <option value="scenery">Scenery</option>
-              </select>
+                <Leaf size={12} />
+                <span>Plants &amp; Foliage</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStudioSection('grass')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors whitespace-nowrap ${
+                  studioSection === 'grass'
+                    ? 'bg-[#20B46A] text-white shadow-sm'
+                    : 'text-slate-600 dark:text-[#A5AEC4] hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Wind size={12} />
+                <span>Grass &amp; Meadow</span>
+              </button>
             </div>
+
+            {studioSection === 'plant' && (
+              <div className="flex items-center gap-2 min-w-0">
+                <input
+                  type="text"
+                  value={plantName}
+                  onChange={(e) => setPlantName(e.target.value)}
+                  maxLength={40}
+                  placeholder="Plant name…"
+                  className="w-40 sm:w-48 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] text-xs font-extrabold focus:outline-none focus:border-[#20B46A]"
+                />
+                <select
+                  value={assetCategory}
+                  onChange={(e) => setAssetCategory(e.target.value as AssetCategory)}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] text-xs font-bold"
+                >
+                  <option value="plant">Plant</option>
+                  <option value="scenery">Scenery</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Load Saved Plants & Starter Presets Dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowLoadMenu((v) => !v)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#282F3F] text-xs font-bold whitespace-nowrap"
-              >
-                <FolderOpen size={13} className="text-[#20B46A]" />
-                <span>Presets &amp; Saved</span>
-                <ChevronDown size={12} />
-              </button>
+            {studioSection === 'plant' ? (
+              <>
+                {/* Load Saved Plants & Starter Presets Dropdown */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowLoadMenu((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#282F3F] text-xs font-bold whitespace-nowrap"
+                  >
+                    <FolderOpen size={13} className="text-[#20B46A]" />
+                    <span>Presets &amp; Saved</span>
+                    <ChevronDown size={12} />
+                  </button>
 
-              {showLoadMenu && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowLoadMenu(false)} />
-                  <div className="absolute right-0 mt-1.5 w-84 max-h-[68vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#1B202C] shadow-2xl border border-slate-200/80 dark:border-white/[0.12] p-2.5 z-40 space-y-2.5 maker-scroll">
-                    <div className="flex items-center justify-between px-1">
-                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#20B46A]">
-                        Saved Plants ({savedPlantAssets.length})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingAssetId(null);
-                          setPlantName('Custom Botanical Plant');
-                          const fresh = createStarterPlantDoc();
-                          setDoc(fresh);
-                          setPaintStrokes([]);
-                          setPaintRedoStack([]);
-                          setSelectedGroupId(fresh.groups[0]?.id ?? null);
-                          setSelectedPartIds([]);
-                          setShowLoadMenu(false);
-                        }}
-                        className="text-[11px] font-bold text-[#20B46A] hover:underline"
-                      >
-                        + Blank Starter
-                      </button>
-                    </div>
-
-                    {savedPlantAssets.length === 0 ? (
-                      <div className="text-xs text-slate-500 dark:text-[#8E96AB] px-2 py-1">
-                        No saved plants yet — try a starter preset below or fan out leaves from the center!
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {savedPlantAssets.map((asset) => (
+                  {showLoadMenu && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setShowLoadMenu(false)} />
+                      <div className="absolute right-0 mt-1.5 w-84 max-h-[68vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#1B202C] shadow-2xl border border-slate-200/80 dark:border-white/[0.12] p-2.5 z-40 space-y-2.5 maker-scroll">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#20B46A]">
+                            Saved Plants ({savedPlantAssets.length})
+                          </span>
                           <button
-                            key={asset.id}
-                            type="button"
-                            onClick={() => loadExistingAsset(asset)}
-                            className={`w-full flex items-center gap-2.5 p-1.5 rounded-xl text-left transition-colors ${
-                              editingAssetId === asset.id
-                                ? 'bg-[#20B46A]/15 border border-[#20B46A]/40'
-                                : 'hover:bg-slate-100 dark:hover:bg-[#252B3B]'
-                            }`}
-                          >
-                            <AssetThumbnail customAsset={asset} size={36} rounded="rounded-lg" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-bold truncate">{asset.name}</div>
-                              <div className="text-[10px] text-slate-500 dark:text-[#949BB0]">
-                                {asset.objectRecipe
-                                  ? `${asset.objectRecipe.parts.length} parts`
-                                  : 'External GLB'}
-                              </div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="pt-2 border-t border-slate-200/80 dark:border-white/[0.08]">
-                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0] px-1 mb-1">
-                        Botanical &amp; Fantasy Starters
-                      </div>
-                      <div className="space-y-1">
-                        {PLANT_STARTER_PRESETS.map((preset) => (
-                          <button
-                            key={preset.id}
                             type="button"
                             onClick={() => {
-                              const built = preset.build();
                               setEditingAssetId(null);
-                              setPlantName(preset.name);
-                              setAssetCategory('plant');
-                              setDoc(built);
+                              setPlantName('Custom Botanical Plant');
+                              const fresh = createStarterPlantDoc();
+                              setDoc(fresh);
                               setPaintStrokes([]);
                               setPaintRedoStack([]);
-                              setSelectedGroupId(built.groups[0]?.id ?? null);
+                              setSelectedGroupId(fresh.groups[0]?.id ?? null);
                               setSelectedPartIds([]);
                               setShowLoadMenu(false);
-                              flashToast(`Loaded "${preset.name}"`);
                             }}
-                            className="w-full px-2.5 py-1.5 rounded-xl text-left hover:bg-slate-100 dark:hover:bg-[#252B3B]"
+                            className="text-[11px] font-bold text-[#20B46A] hover:underline"
                           >
-                            <div className="text-xs font-bold">{preset.name}</div>
-                            <div className="text-[10px] text-slate-500 dark:text-[#949BB0] truncate">
-                              {preset.summary}
-                            </div>
+                            + Blank Starter
                           </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {otherEditableAssets.length > 0 && (
-                      <div className="pt-2 border-t border-slate-200/80 dark:border-white/[0.08]">
-                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0] px-1 mb-1">
-                          Other Editable Recipes
                         </div>
-                        <div className="space-y-1">
-                          {otherEditableAssets.slice(0, 6).map((asset) => (
-                            <button
-                              key={asset.id}
-                              type="button"
-                              onClick={() => loadExistingAsset(asset)}
-                              className="w-full px-2.5 py-1 rounded-lg text-left text-xs font-semibold hover:bg-slate-100 dark:hover:bg-[#252B3B] truncate"
-                            >
-                              {asset.name}
-                            </button>
-                          ))}
+
+                        {savedPlantAssets.length === 0 ? (
+                          <div className="text-xs text-slate-500 dark:text-[#8E96AB] px-2 py-1">
+                            No saved plants yet — try a starter preset below or fan out leaves from the center!
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {savedPlantAssets.map((asset) => (
+                              <button
+                                key={asset.id}
+                                type="button"
+                                onClick={() => loadExistingAsset(asset)}
+                                className={`w-full flex items-center gap-2.5 p-1.5 rounded-xl text-left transition-colors ${
+                                  editingAssetId === asset.id
+                                    ? 'bg-[#20B46A]/15 border border-[#20B46A]/40'
+                                    : 'hover:bg-slate-100 dark:hover:bg-[#252B3B]'
+                                }`}
+                              >
+                                <AssetThumbnail customAsset={asset} size={36} rounded="rounded-lg" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-bold truncate">{asset.name}</div>
+                                  <div className="text-[10px] text-slate-500 dark:text-[#949BB0]">
+                                    {asset.objectRecipe
+                                      ? `${asset.objectRecipe.parts.length} parts`
+                                      : 'External GLB'}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="pt-2 border-t border-slate-200/80 dark:border-white/[0.08]">
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0] px-1 mb-1">
+                            Botanical &amp; Fantasy Starters
+                          </div>
+                          <div className="space-y-1">
+                            {PLANT_STARTER_PRESETS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                onClick={() => {
+                                  const built = preset.build();
+                                  setEditingAssetId(null);
+                                  setPlantName(preset.name);
+                                  setAssetCategory('plant');
+                                  setDoc(built);
+                                  setPaintStrokes([]);
+                                  setPaintRedoStack([]);
+                                  setSelectedGroupId(built.groups[0]?.id ?? null);
+                                  setSelectedPartIds([]);
+                                  setShowLoadMenu(false);
+                                  flashToast(`Loaded "${preset.name}"`);
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded-xl text-left hover:bg-slate-100 dark:hover:bg-[#252B3B]"
+                              >
+                                <div className="text-xs font-bold">{preset.name}</div>
+                                <div className="text-[10px] text-slate-500 dark:text-[#949BB0] truncate">
+                                  {preset.summary}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
                         </div>
+
+                        {otherEditableAssets.length > 0 && (
+                          <div className="pt-2 border-t border-slate-200/80 dark:border-white/[0.08]">
+                            <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0] px-1 mb-1">
+                              Other Editable Recipes
+                            </div>
+                            <div className="space-y-1">
+                              {otherEditableAssets.slice(0, 6).map((asset) => (
+                                <button
+                                  key={asset.id}
+                                  type="button"
+                                  onClick={() => loadExistingAsset(asset)}
+                                  className="w-full px-2.5 py-1 rounded-lg text-left text-xs font-semibold hover:bg-slate-100 dark:hover:bg-[#252B3B] truncate"
+                                >
+                                  {asset.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+                    </>
+                  )}
+                </div>
 
-            <button
-              type="button"
-              disabled={undoStack.length === 0}
-              onClick={handleUndo}
-              title="Undo (Ctrl+Z)"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-[#1F2430] disabled:opacity-35 hover:bg-slate-200 dark:hover:bg-[#282F3F]"
-            >
-              <Undo2 size={14} />
-            </button>
-            <button
-              type="button"
-              disabled={redoStack.length === 0}
-              onClick={handleRedo}
-              title="Redo (Ctrl+Shift+Z)"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-[#1F2430] disabled:opacity-35 hover:bg-slate-200 dark:hover:bg-[#282F3F]"
-            >
-              <Redo2 size={14} />
-            </button>
+                <button
+                  type="button"
+                  disabled={undoStack.length === 0}
+                  onClick={handleUndo}
+                  title="Undo (Ctrl+Z)"
+                  className="p-2 rounded-xl bg-slate-100 dark:bg-[#1F2430] disabled:opacity-35 hover:bg-slate-200 dark:hover:bg-[#282F3F]"
+                >
+                  <Undo2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  disabled={redoStack.length === 0}
+                  onClick={handleRedo}
+                  title="Redo (Ctrl+Shift+Z)"
+                  className="p-2 rounded-xl bg-slate-100 dark:bg-[#1F2430] disabled:opacity-35 hover:bg-slate-200 dark:hover:bg-[#282F3F]"
+                >
+                  <Redo2 size={14} />
+                </button>
 
-            <label className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] text-[11px] font-bold cursor-pointer whitespace-nowrap">
-              <input
-                type="checkbox"
-                checked={placeOnSave}
-                onChange={(e) => setPlaceOnSave(e.target.checked)}
-                className="accent-[#20B46A]"
-              />
-              <span>Drop in Level</span>
-            </label>
+                <label className="hidden xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] text-[11px] font-bold cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={placeOnSave}
+                    onChange={(e) => setPlaceOnSave(e.target.checked)}
+                    className="accent-[#20B46A]"
+                  />
+                  <span>Drop in Level</span>
+                </label>
 
-            {editingAssetId && (
-              <button
-                type="button"
-                disabled={saving}
-                onClick={() => void handleSaveAsset({ asCopy: true, placeNow: false })}
-                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#282F3F] text-xs font-bold disabled:opacity-50 whitespace-nowrap"
-              >
-                Save Copy
-              </button>
+                {editingAssetId && (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => void handleSaveAsset({ asCopy: true, placeNow: false })}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#282F3F] text-xs font-bold disabled:opacity-50 whitespace-nowrap"
+                  >
+                    Save Copy
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void handleSaveAsset({ placeNow: placeOnSave })}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#20B46A] hover:opacity-95 text-white text-xs font-extrabold shadow-sm disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Save size={13} />
+                  <span>{saving ? 'Exporting GLB…' : editingAssetId ? 'Save Changes' : 'Save to Plants'}</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    patchGrassConfig(createDefaultGrassConfig(), true);
+                    flashToast('Reset grass settings to defaults');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] hover:bg-slate-200 dark:hover:bg-[#282F3F] text-xs font-bold whitespace-nowrap"
+                >
+                  <RotateCcw size={13} />
+                  <span>Reset Defaults</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#20B46A] hover:opacity-95 text-white text-xs font-extrabold shadow-sm whitespace-nowrap"
+                >
+                  <span>Done</span>
+                </button>
+              </>
             )}
-
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => void handleSaveAsset({ placeNow: placeOnSave })}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#20B46A] hover:opacity-95 text-white text-xs font-extrabold shadow-sm disabled:opacity-50 whitespace-nowrap"
-            >
-              <Save size={13} />
-              <span>{saving ? 'Exporting GLB…' : editingAssetId ? 'Save Changes' : 'Save to Plants'}</span>
-            </button>
 
             <button
               type="button"
@@ -2306,13 +2552,76 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
           </div>
         </header>
 
+        {/* DEDICATED GRASS MAKER SUB-HEADER */}
+        {studioSection === 'grass' && (
+          <div className="shrink-0 px-4 py-2.5 border-b border-slate-200/80 dark:border-white/[0.08] bg-gradient-to-r from-[#20B46A]/10 via-emerald-500/5 to-transparent dark:from-[#20B46A]/15 dark:via-[#141A24] dark:to-[#171A23] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-[#20B46A]/20 border border-[#20B46A]/35 text-[#20B46A] flex items-center justify-center shrink-0">
+                <Sprout size={18} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
+                  Grass &amp; Meadow Maker
+                </h2>
+                <p className="text-[11px] font-medium text-slate-600 dark:text-[#9AA3B8] truncate">
+                  Inspect multi-clump spacing, tuft clumpiness, lushness, and wind flow on a live sample plot
+                  {currentLevel ? ` · Synced with "${currentLevel.name}"` : ''}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 rounded-xl bg-white/80 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] p-1">
+                {([
+                  [2.5, '2.5×2.5m'],
+                  [4, '4×4m'],
+                  [6, '6×6m'],
+                ] as const).map(([sz, lbl]) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setGrassPatchSize(sz)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold tabular-nums transition-colors whitespace-nowrap ${
+                      grassPatchSize === sz
+                        ? 'bg-[#20B46A] text-white'
+                        : 'text-slate-600 dark:text-[#9FA8BE] hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGrassGuides((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-colors whitespace-nowrap ${
+                  showGrassGuides
+                    ? 'bg-[#F59E0B]/15 border-[#F59E0B]/40 text-amber-700 dark:text-amber-300'
+                    : 'bg-white/80 dark:bg-[#12151E] border-slate-200/80 dark:border-white/[0.08] text-slate-600 dark:text-[#A5AEC4]'
+                }`}
+              >
+                <Grid3X3 size={13} />
+                <span>1m Grid &amp; Clumps</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setGrassSeed((s) => s + 1)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/80 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#20B46A] text-[11px] font-bold whitespace-nowrap"
+              >
+                <Dices size={13} className="text-[#20B46A]" />
+                <span>Reseed Sample</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* MAIN STUDIO WORKSPACE */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
-          {/* LEFT DOCK: Organic Shapes Panel & Plant Hierarchy */}
-          {showLeftDock && (
-            <aside className="w-[244px] shrink-0 border-r border-slate-200/80 dark:border-white/[0.08] bg-slate-50 dark:bg-[#131720] flex flex-col min-h-0">
+          {/* LEFT DOCK */}
+          {showLeftDock && studioSection === 'plant' && (
+            <aside className="w-[258px] shrink-0 border-r border-slate-200/80 dark:border-white/[0.08] bg-slate-50 dark:bg-[#131720] flex flex-col min-h-0">
               {/* Organic Botanical & Fantasy Shapes Panel */}
-              <div className="p-2.5 border-b border-slate-200/80 dark:border-white/[0.08] space-y-2 max-h-[50%] flex flex-col min-h-0">
+              <div className="p-2.5 border-b border-slate-200/80 dark:border-white/[0.08] space-y-2 h-[50%] min-h-[210px] flex flex-col min-h-0">
                 <div className="flex items-center justify-between gap-1 shrink-0">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8E96AB]">
                     Organic Shapes
@@ -2352,30 +2661,32 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
                   ))}
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-y-auto grid grid-cols-2 gap-1 pr-0.5 maker-scroll">
-                  {filteredCatalog.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => addOrganicPart(item.id)}
-                      title={item.hint}
-                      className="px-2 py-1.5 rounded-lg bg-white dark:bg-[#1B202C] hover:bg-[#20B46A] hover:text-white border border-slate-200/80 dark:border-white/[0.06] text-left text-[11px] font-bold truncate transition-colors"
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                  {shapeFilter === 'fantasy' &&
-                    PLANT_SHAPE_CATALOG.filter((s) => s.category === 'stem').map((item) => (
+                <div className="flex-1 min-h-0 overflow-y-auto pr-1 maker-scroll">
+                  <div className="grid grid-cols-2 gap-1.5 auto-rows-max content-start pb-1">
+                    {filteredCatalog.map((item) => (
                       <button
                         key={item.id}
                         type="button"
                         onClick={() => addOrganicPart(item.id)}
                         title={item.hint}
-                        className="px-2 py-1.5 rounded-lg bg-white dark:bg-[#1B202C] hover:bg-[#20B46A] hover:text-white border border-slate-200/80 dark:border-white/[0.06] text-left text-[11px] font-bold truncate transition-colors"
+                        className="min-h-[32px] px-2 py-1.5 rounded-lg bg-white dark:bg-[#1B202C] hover:bg-[#20B46A] hover:text-white border border-slate-200/80 dark:border-white/[0.06] text-left text-[11px] font-bold leading-snug truncate transition-colors"
                       >
                         {item.label}
                       </button>
                     ))}
+                    {shapeFilter === 'fantasy' &&
+                      PLANT_SHAPE_CATALOG.filter((s) => s.category === 'stem').map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => addOrganicPart(item.id)}
+                          title={item.hint}
+                          className="min-h-[32px] px-2 py-1.5 rounded-lg bg-white dark:bg-[#1B202C] hover:bg-[#20B46A] hover:text-white border border-slate-200/80 dark:border-white/[0.06] text-left text-[11px] font-bold leading-snug truncate transition-colors"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                  </div>
                 </div>
               </div>
 
@@ -2562,6 +2873,126 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
             </aside>
           )}
 
+          {/* LEFT DOCK: GRASS SAMPLE PLOT & MEADOW PRESETS */}
+          {showLeftDock && studioSection === 'grass' && (
+            <aside className="w-[268px] shrink-0 border-r border-slate-200/80 dark:border-white/[0.08] bg-slate-50 dark:bg-[#131720] flex flex-col min-h-0">
+              <div className="p-3 border-b border-slate-200/80 dark:border-white/[0.08] space-y-2.5 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#20B46A]">
+                    Patch Sample Metrics
+                  </span>
+                  <span className="text-[11px] font-mono font-bold tabular-nums text-slate-500 dark:text-[#949BB0]">
+                    {grassStats.patchAreaSqM.toFixed(1)} m²
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#1B202C] border border-slate-200/80 dark:border-white/[0.06]">
+                    <div className="text-[10px] font-bold text-slate-500 dark:text-[#8E96AB]">
+                      Blades in Patch
+                    </div>
+                    <div className="text-sm font-extrabold font-mono tabular-nums text-slate-900 dark:text-white">
+                      {grassStats.bladeCount}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#1B202C] border border-slate-200/80 dark:border-white/[0.06]">
+                    <div className="text-[10px] font-bold text-slate-500 dark:text-[#8E96AB]">
+                      Density / m²
+                    </div>
+                    <div className="text-sm font-extrabold font-mono tabular-nums text-[#20B46A]">
+                      {grassStats.bladesPerSqM.toFixed(1)}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#1B202C] border border-slate-200/80 dark:border-white/[0.06]">
+                    <div className="text-[10px] font-bold text-slate-500 dark:text-[#8E96AB]">
+                      Tuft Clumps
+                    </div>
+                    <div className="text-sm font-extrabold font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                      {grassStats.clumpCount}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-[#1B202C] border border-slate-200/80 dark:border-white/[0.06]">
+                    <div className="text-[10px] font-bold text-slate-500 dark:text-[#8E96AB]">
+                      Cell Spacing
+                    </div>
+                    <div className="text-sm font-extrabold font-mono tabular-nums text-slate-900 dark:text-white">
+                      {grassStats.cellSpacingM.toFixed(2)}m
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1 pt-0.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-[#A5AEC4]">
+                    <span>Preview Breeze</span>
+                    <span className="font-mono tabular-nums">
+                      {Math.round(grassPreviewWind * 100)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(
+                      [
+                        [0.12, 'Calm'],
+                        [0.45, 'Breeze'],
+                        [0.95, 'Gust'],
+                      ] as const
+                    ).map(([wVal, lbl]) => (
+                      <button
+                        key={lbl}
+                        type="button"
+                        onClick={() => setGrassPreviewWind(wVal)}
+                        className={`py-1 rounded-lg text-[10px] font-extrabold transition-colors ${
+                          Math.abs(grassPreviewWind - wVal) < 0.08
+                            ? 'bg-[#20B46A] text-white'
+                            : 'bg-white dark:bg-[#1B202C] border border-slate-200/80 dark:border-white/[0.06] text-slate-600 dark:text-[#9FA8BE]'
+                        }`}
+                      >
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 flex flex-col p-3 space-y-2">
+                <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8E96AB] shrink-0">
+                  Meadow Presets
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 maker-scroll">
+                  {GRASS_MEADOW_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => {
+                        patchGrassConfig(preset.patch, true);
+                        flashToast(`Applied "${preset.name}"`);
+                      }}
+                      className="w-full p-2.5 rounded-xl bg-white dark:bg-[#1B202C] hover:border-[#20B46A] border border-slate-200/80 dark:border-white/[0.06] text-left transition-colors space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                          {preset.name}
+                        </span>
+                        <div className="flex items-center -space-x-1 shrink-0">
+                          <span
+                            className="w-3 h-3 rounded-full border border-black/25"
+                            style={{ backgroundColor: preset.patch.primaryColor }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-full border border-black/25"
+                            style={{ backgroundColor: preset.patch.secondaryColor }}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-[#8E96AB] leading-snug">
+                        {preset.summary}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </aside>
+          )}
+
           {/* CENTER 3D VIEWPORT */}
           <div className="flex-1 min-w-0 relative bg-[#101915] select-none touch-none">
             <div ref={viewportMountRef} className="w-full h-full touch-none" />
@@ -2594,94 +3025,136 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
             )}
 
             {/* Top Viewport Toolbar */}
-            <div className="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-              <div className="flex items-center gap-1.5 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
-                <button
-                  type="button"
-                  onClick={() => setShowLeftDock((v) => !v)}
-                  className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10 whitespace-nowrap"
-                >
-                  {showLeftDock ? '« Shapes' : 'Shapes »'}
-                </button>
-                <div className="w-px h-4 bg-white/10" />
-                {(
-                  [
-                    ['select', 'Marquee', MousePointer2],
-                    ['translate', 'Move', Move],
-                    ['rotate', 'Rotate', RotateCw],
-                    ['scale', 'Scale', Scaling],
-                  ] as const
-                ).map(([id, label, Icon]) => (
+            {studioSection === 'plant' ? (
+              <div className="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+                <div className="flex items-center gap-1.5 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
                   <button
-                    key={id}
+                    type="button"
+                    onClick={() => setShowLeftDock((v) => !v)}
+                    className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10 whitespace-nowrap"
+                  >
+                    {showLeftDock ? '« Shapes' : 'Shapes »'}
+                  </button>
+                  <div className="w-px h-4 bg-white/10" />
+                  {(
+                    [
+                      ['select', 'Marquee', MousePointer2],
+                      ['translate', 'Move', Move],
+                      ['rotate', 'Rotate', RotateCw],
+                      ['scale', 'Scale', Scaling],
+                    ] as const
+                  ).map(([id, label, Icon]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setToolMode(id);
+                        if (id !== 'translate') setActiveCurvePtIdx(null);
+                      }}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors whitespace-nowrap ${
+                        toolMode === id
+                          ? 'bg-[#20B46A] text-white'
+                          : 'text-slate-300 hover:bg-white/10'
+                      }`}
+                    >
+                      <Icon size={12} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                  <div className="w-px h-4 bg-white/10" />
+                  <select
+                    value={gridSnapStep}
+                    onChange={(e) => setGridSnapStep(Number(e.target.value) as 0 | 0.05 | 0.1 | 0.25)}
+                    className="bg-transparent text-[11px] font-bold text-slate-200 px-1.5 py-1 focus:outline-none cursor-pointer"
+                  >
+                    <option value={0} className="bg-[#121D18]">Snap: Free</option>
+                    <option value={0.05} className="bg-[#121D18]">Snap: 0.05m</option>
+                    <option value={0.1} className="bg-[#121D18]">Snap: 0.10m</option>
+                    <option value={0.25} className="bg-[#121D18]">Snap: 0.25m</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
+                  <button
                     type="button"
                     onClick={() => {
-                      setToolMode(id);
-                      if (id !== 'translate') setActiveCurvePtIdx(null);
+                      setCurveEnabled((v) => !v);
+                      if (!curveEnabled) setInspectorTab('shape');
                     }}
                     className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors whitespace-nowrap ${
-                      toolMode === id
+                      curveEnabled
                         ? 'bg-[#20B46A] text-white'
                         : 'text-slate-300 hover:bg-white/10'
                     }`}
                   >
-                    <Icon size={12} />
-                    <span>{label}</span>
+                    <Spline size={12} />
+                    <span>Vine Curve</span>
                   </button>
-                ))}
-                <div className="w-px h-4 bg-white/10" />
-                <select
-                  value={gridSnapStep}
-                  onChange={(e) => setGridSnapStep(Number(e.target.value) as 0 | 0.05 | 0.1 | 0.25)}
-                  className="bg-transparent text-[11px] font-bold text-slate-200 px-1.5 py-1 focus:outline-none cursor-pointer"
-                >
-                  <option value={0} className="bg-[#121D18]">Snap: Free</option>
-                  <option value={0.05} className="bg-[#121D18]">Snap: 0.05m</option>
-                  <option value={0.1} className="bg-[#121D18]">Snap: 0.10m</option>
-                  <option value={0.25} className="bg-[#121D18]">Snap: 0.25m</option>
-                </select>
+                  <div className="w-px h-4 bg-white/10" />
+                  {(
+                    [
+                      ['threeQuarter', '3/4'],
+                      ['front', 'Front'],
+                      ['top', 'Top'],
+                      ['close', 'Close'],
+                    ] as const
+                  ).map(([preset, lbl]) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCameraPreset(preset)}
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10"
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
               </div>
-
-              <div className="flex items-center gap-1.5 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCurveEnabled((v) => !v);
-                    if (!curveEnabled) setInspectorTab('shape');
-                  }}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors whitespace-nowrap ${
-                    curveEnabled
-                      ? 'bg-[#20B46A] text-white'
-                      : 'text-slate-300 hover:bg-white/10'
-                  }`}
-                >
-                  <Spline size={12} />
-                  <span>Vine Curve</span>
-                </button>
-                <div className="w-px h-4 bg-white/10" />
-                {(
-                  [
-                    ['threeQuarter', '3/4'],
-                    ['front', 'Front'],
-                    ['top', 'Top'],
-                    ['close', 'Close'],
-                  ] as const
-                ).map(([preset, lbl]) => (
+            ) : (
+              <div className="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+                <div className="flex items-center gap-1.5 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
                   <button
-                    key={preset}
                     type="button"
-                    onClick={() => setCameraPreset(preset)}
-                    className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10"
+                    onClick={() => setShowLeftDock((v) => !v)}
+                    className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10 whitespace-nowrap"
                   >
-                    {lbl}
+                    {showLeftDock ? '« Presets' : 'Presets »'}
                   </button>
-                ))}
+                  <div className="w-px h-4 bg-white/10" />
+                  <span className="px-2 py-1 text-[11px] font-bold text-[#34D399] tabular-nums whitespace-nowrap">
+                    {grassPatchSize}×{grassPatchSize}m Plot · {grassStats.clumpCount} Clumps · {grassStats.bladeCount} Blades
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 bg-[#0F1814]/90 border border-white/[0.1] rounded-xl p-1 pointer-events-auto">
+                  {(
+                    [
+                      ['threeQuarter', '3/4'],
+                      ['front', 'Low Meadow'],
+                      ['top', 'Top Grid'],
+                      ['close', 'Close Tuft'],
+                    ] as const
+                  ).map(([preset, lbl]) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCameraPreset(preset)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-300 hover:bg-white/10 whitespace-nowrap"
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Bottom Contextual Action Strip */}
             <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-center gap-2 pointer-events-none">
-              {activeClusterGroup?.plantCluster ? (
+              {studioSection === 'grass' ? (
+                <div className="px-3 py-1 rounded-xl bg-[#0F1814]/85 border border-white/[0.1] text-[11px] font-semibold text-slate-300">
+                  Drag to orbit · Scroll to zoom · Amber rings mark clump centers on a 1m square grid
+                </div>
+              ) : activeClusterGroup?.plantCluster ? (
                 <div className="flex flex-wrap items-center gap-2 px-3.5 py-2 rounded-2xl bg-[#0F1814]/95 border border-[#20B46A]/45 text-white pointer-events-auto shadow-xl">
                   <span className="text-[11px] font-extrabold text-[#34D399] whitespace-nowrap">
                     {activeClusterGroup.name}
@@ -2809,8 +3282,239 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
             </div>
           </div>
 
-          {/* RIGHT CONTEXTUAL INSPECTOR (Cluster 1–20 | Shape & Sculpt | Pattern & Glow | Paint) */}
-          <aside className="w-[332px] xl:w-[360px] shrink-0 border-l border-slate-200/80 dark:border-white/[0.08] bg-white dark:bg-[#171A23] flex flex-col min-h-0">
+          {/* RIGHT CONTEXTUAL INSPECTOR */}
+          {studioSection === 'grass' ? (
+            <aside className="w-[332px] xl:w-[360px] shrink-0 border-l border-slate-200/80 dark:border-white/[0.08] bg-white dark:bg-[#171A23] flex flex-col min-h-0">
+              <div className="shrink-0 px-3.5 py-2.5 border-b border-slate-200/80 dark:border-white/[0.08] bg-slate-50 dark:bg-[#131720] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sprout size={14} className="text-[#20B46A]" />
+                  <span className="text-xs font-extrabold tracking-tight">Meadow Parameters</span>
+                </div>
+                <span className="text-[11px] font-mono font-bold tabular-nums text-[#20B46A]">
+                  {grassCfg.enabled && grassCfg.quality !== 'off'
+                    ? `LOD ${Math.round(grassCfg.viewDistance)}m`
+                    : 'Disabled'}
+                </span>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-4 maker-scroll">
+                {/* Density Quality */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8E96AB]">
+                    Density Tier
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {(
+                      [
+                        { id: 'off', label: 'Off' },
+                        { id: 'light', label: 'Light' },
+                        { id: 'lush', label: 'Lush' },
+                        { id: 'dense', label: 'Dense' },
+                        { id: 'ultra', label: 'Ultra' },
+                      ] as { id: GrassQuality; label: string }[]
+                    ).map((q) => {
+                      const activeQuality: GrassQuality = grassCfg.enabled ? grassCfg.quality : 'off';
+                      return (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() =>
+                            patchGrassConfig(
+                              q.id === 'off'
+                                ? { enabled: false, quality: 'off' }
+                                : { enabled: true, quality: q.id },
+                              true
+                            )
+                          }
+                          className={`py-1.5 rounded-xl text-[10px] font-extrabold border transition-colors ${
+                            activeQuality === q.id
+                              ? 'border-[#20B46A] bg-[#20B46A] text-white'
+                              : 'border-slate-200/80 dark:border-white/[0.06] bg-slate-50 dark:bg-[#12151E] text-slate-600 dark:text-[#9FA8BE]'
+                          }`}
+                        >
+                          {q.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {grassCfg.enabled && grassCfg.quality !== 'off' && (
+                  <>
+                    {/* Clumpiness & Lushness */}
+                    <div className="space-y-2.5 pt-3 border-t border-slate-200/70 dark:border-white/[0.08]">
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8E96AB]">
+                        Clumpiness &amp; Lushness
+                      </div>
+                      {(
+                        [
+                          {
+                            key: 'tuftClumpiness',
+                            label: 'Tuft Clumpiness',
+                            min: 0,
+                            max: 1,
+                            step: 0.05,
+                            fmt: (v: number) => `${Math.round(v * 100)}%`,
+                          },
+                          {
+                            key: 'carexMix',
+                            label: 'Tall Carex / Sedge Mix',
+                            min: 0,
+                            max: 1,
+                            step: 0.05,
+                            fmt: (v: number) => `${Math.round(v * 100)}%`,
+                          },
+                          {
+                            key: 'bladeHeight',
+                            label: 'Blade Height',
+                            min: 0.35,
+                            max: 1.45,
+                            step: 0.05,
+                            fmt: (v: number) => `${v.toFixed(2)}m`,
+                          },
+                          {
+                            key: 'bladeWidth',
+                            label: 'Blade Width',
+                            min: 0.05,
+                            max: 0.18,
+                            step: 0.01,
+                            fmt: (v: number) => `${v.toFixed(2)}m`,
+                          },
+                        ] as const
+                      ).map((ctl) => {
+                        const val = Number(
+                          (grassCfg as unknown as Record<string, number>)[ctl.key] ?? 0.5
+                        );
+                        return (
+                          <div key={ctl.key} className="space-y-0.5">
+                            <div className="flex items-center justify-between text-[11px] font-semibold">
+                              <span>{ctl.label}</span>
+                              <span className="font-mono tabular-nums text-slate-500 dark:text-[#949BB0]">
+                                {ctl.fmt(val)}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={ctl.min}
+                              max={ctl.max}
+                              step={ctl.step}
+                              value={val}
+                              onChange={(e) =>
+                                patchGrassConfig({ [ctl.key]: Number(e.target.value) })
+                              }
+                              className="w-full accent-[#20B46A]"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Dual-Tone Color & Lighting */}
+                    <div className="space-y-2.5 pt-3 border-t border-slate-200/70 dark:border-white/[0.08]">
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8E96AB]">
+                        Dual-Tone Colors &amp; Motion
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.06] text-[11px] font-bold">
+                          <span>Primary</span>
+                          <input
+                            type="color"
+                            value={grassCfg.primaryColor ?? '#54B049'}
+                            onChange={(e) => patchGrassConfig({ primaryColor: e.target.value })}
+                            className="w-7 h-5 rounded cursor-pointer border-0 bg-transparent"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.06] text-[11px] font-bold">
+                          <span>Secondary</span>
+                          <input
+                            type="color"
+                            value={grassCfg.secondaryColor ?? '#98D954'}
+                            onChange={(e) => patchGrassConfig({ secondaryColor: e.target.value })}
+                            className="w-7 h-5 rounded cursor-pointer border-0 bg-transparent"
+                          />
+                        </label>
+                      </div>
+
+                      {(
+                        [
+                          {
+                            key: 'mixNoiseScale',
+                            label: 'Dual-Tone Mix Scale',
+                            min: 0.2,
+                            max: 3,
+                            step: 0.1,
+                            fmt: (v: number) => `${v.toFixed(1)}×`,
+                          },
+                          {
+                            key: 'windWaveStrength',
+                            label: 'Wind Wave Flow',
+                            min: 0.2,
+                            max: 2.0,
+                            step: 0.1,
+                            fmt: (v: number) => `${Math.round(v * 100)}%`,
+                          },
+                          {
+                            key: 'tipGlow',
+                            label: 'Tip Sun Glow',
+                            min: 0,
+                            max: 1.2,
+                            step: 0.05,
+                            fmt: (v: number) => `${Math.round(v * 100)}%`,
+                          },
+                          {
+                            key: 'viewDistance',
+                            label: 'View Distance LOD',
+                            min: 30,
+                            max: 85,
+                            step: 2,
+                            fmt: (v: number) => `${Math.round(v)}m`,
+                          },
+                        ] as const
+                      ).map((ctl) => {
+                        const val = Number(
+                          (grassCfg as unknown as Record<string, number>)[ctl.key] ?? 0.5
+                        );
+                        return (
+                          <div key={ctl.key} className="space-y-0.5">
+                            <div className="flex items-center justify-between text-[11px] font-semibold">
+                              <span>{ctl.label}</span>
+                              <span className="font-mono tabular-nums text-slate-500 dark:text-[#949BB0]">
+                                {ctl.fmt(val)}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={ctl.min}
+                              max={ctl.max}
+                              step={ctl.step}
+                              value={val}
+                              onChange={(e) =>
+                                patchGrassConfig({ [ctl.key]: Number(e.target.value) })
+                              }
+                              className="w-full accent-[#20B46A]"
+                            />
+                          </div>
+                        );
+                      })}
+
+                      <label className="flex items-center justify-between text-[11px] font-bold cursor-pointer pt-1">
+                        <span>Part grass around hero</span>
+                        <input
+                          type="checkbox"
+                          checked={grassCfg.interactiveParting}
+                          onChange={(e) =>
+                            patchGrassConfig({ interactiveParting: e.target.checked }, true)
+                          }
+                          className="accent-[#20B46A]"
+                        />
+                      </label>
+                    </div>
+                  </>
+                )}
+              </div>
+            </aside>
+          ) : (
+            <aside className="w-[332px] xl:w-[360px] shrink-0 border-l border-slate-200/80 dark:border-white/[0.08] bg-white dark:bg-[#171A23] flex flex-col min-h-0">
             <div className="shrink-0 p-2 border-b border-slate-200/80 dark:border-white/[0.08] grid grid-cols-4 gap-1 bg-slate-50 dark:bg-[#131720]">
               <button
                 type="button"
@@ -3846,6 +4550,7 @@ export const PlantMakerModal: React.FC<PlantMakerModalProps> = ({
               )}
             </div>
           </aside>
+          )}
         </div>
       </div>
     </div>
