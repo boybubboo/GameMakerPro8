@@ -119,9 +119,9 @@ export const ActionButtonBindings: {
   shortcut: string;
   defaultColor: string;
 }[] = [
-  { id: 'jump', title: 'Jump', shortcut: 'Space', defaultColor: '#20B46A' },
-  { id: 'attack', title: 'Hit / Sword', shortcut: 'F', defaultColor: '#F2545B' },
-  { id: 'interact', title: 'Use / Talk', shortcut: 'E', defaultColor: '#F59E0B' },
+  { id: 'jump', title: 'Jump', shortcut: 'Space / Shift', defaultColor: '#20B46A' },
+  { id: 'attack', title: 'Hit / Sword', shortcut: 'F / Ctrl', defaultColor: '#F2545B' },
+  { id: 'interact', title: 'Use / Talk', shortcut: 'E / Alt', defaultColor: '#F59E0B' },
   { id: 'magicBolt', title: 'Magic Bolt', shortcut: 'R', defaultColor: '#38BDF8' },
   { id: 'heal', title: 'Heal', shortcut: 'H', defaultColor: '#A855F7' },
 ];

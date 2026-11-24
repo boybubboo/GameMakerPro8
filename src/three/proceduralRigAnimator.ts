@@ -1840,30 +1840,92 @@ export class ProceduralRigController {
     }
 
     if (slot === 'attack') {
-      // Looping 0.62s slash/chop cadence for preview & crisp single strike in play mode
-      const cycle = (this.attackElapsed % 0.62) / 0.62;
-      const windup = Math.sin(Math.min(1, cycle / 0.35) * Math.PI * 0.5);
-      const strike = cycle < 0.35 ? -windup : Math.sin(((cycle - 0.35) / 0.65) * Math.PI);
+      // Forehand right-hand swing: wind back outward to the right with elbow bent back -> swing inward -> recover
+      const cycle = (this.attackElapsed % 0.48) / 0.48;
       const armScale = slotTuning.armSwing;
       const kneeScale = slotTuning.kneeBend;
       const leanBias = THREE.MathUtils.degToRad(slotTuning.torsoLean);
 
-      this.applyCharSpacePose('spine', strike * 0.24 * strength + leanBias * 0.5, strike * 0.42 * strength, 0);
-      this.applyCharSpacePose('chest', strike * 0.18 * strength + leanBias * 0.4, strike * 0.34 * strength, 0);
-      this.applyCharSpacePose('head', -strike * 0.08 * headMult, -strike * 0.32 * headMult, 0);
+      let torsoYaw = 0;
+      let torsoPitch = 0;
+      let rArmPitch = 0;
+      let rArmYaw = 0;
+      let rArmRollOffset = 0;
+      let rElbowPitch = -0.18;
+      let rElbowRoll = 0;
+      let lArmPitch = 0;
+      let lArmRollOffset = 0;
 
-      // Right arm winds up high and chops down/across
+      if (cycle < 0.30) {
+        // Phase 1: Backswing outward to the right, bending back at the elbow joint
+        const w = Math.sin((cycle / 0.30) * Math.PI * 0.5);
+        torsoYaw = -0.44 * w;
+        torsoPitch = -0.08 * w;
+        rArmPitch = 0.34 * w;
+        rArmYaw = -0.74 * w;
+        rArmRollOffset = -1.16 * w;
+        rElbowPitch = THREE.MathUtils.lerp(-0.18, 0.94, w);
+        rElbowRoll = -0.36 * w;
+        lArmPitch = -0.22 * w;
+        lArmRollOffset = 0.22 * w;
+      } else if (cycle < 0.68) {
+        // Phase 2: Drive torso & right arm forward and inward across the front
+        const s = (cycle - 0.30) / 0.38;
+        const ease = 1 - Math.pow(1 - s, 2.8);
+        torsoYaw = THREE.MathUtils.lerp(-0.44, 0.56, ease);
+        torsoPitch = THREE.MathUtils.lerp(-0.08, 0.22, ease);
+        rArmPitch = THREE.MathUtils.lerp(0.34, -1.08, ease);
+        rArmYaw = THREE.MathUtils.lerp(-0.74, 1.18, ease);
+        rArmRollOffset = THREE.MathUtils.lerp(-1.16, -0.46, ease);
+        rElbowPitch =
+          s < 0.45
+            ? THREE.MathUtils.lerp(0.94, -0.24, s / 0.45)
+            : THREE.MathUtils.lerp(-0.24, -0.68, (s - 0.45) / 0.55);
+        rElbowRoll = THREE.MathUtils.lerp(-0.36, 0.28, ease);
+        lArmPitch = THREE.MathUtils.lerp(-0.22, 0.38, ease);
+        lArmRollOffset = THREE.MathUtils.lerp(0.22, 0.14, ease);
+      } else {
+        // Phase 3: Smooth recovery back to ready stance
+        const r = (cycle - 0.68) / 0.32;
+        const ease = r * r * (3 - 2 * r);
+        torsoYaw = THREE.MathUtils.lerp(0.56, 0, ease);
+        torsoPitch = THREE.MathUtils.lerp(0.22, 0, ease);
+        rArmPitch = THREE.MathUtils.lerp(-1.08, 0, ease);
+        rArmYaw = THREE.MathUtils.lerp(1.18, 0, ease);
+        rArmRollOffset = THREE.MathUtils.lerp(-0.46, 0, ease);
+        rElbowPitch = THREE.MathUtils.lerp(-0.68, -0.18, ease);
+        rElbowRoll = THREE.MathUtils.lerp(0.28, 0, ease);
+        lArmPitch = THREE.MathUtils.lerp(0.38, 0, ease);
+        lArmRollOffset = THREE.MathUtils.lerp(0.14, 0, ease);
+      }
+
+      this.applyCharSpacePose('spine', torsoPitch * 0.6 * strength + leanBias * 0.5, torsoYaw * 0.55 * strength, 0);
+      this.applyCharSpacePose('chest', torsoPitch * 0.45 * strength + leanBias * 0.4, torsoYaw * 0.45 * strength, 0);
+      this.applyCharSpacePose('head', -torsoPitch * 0.25 * headMult, -torsoYaw * 0.65 * headMult, 0);
+
       this.applyCharSpacePose(
         'rightUpperArm',
-        (-1.45 * (1 - Math.max(0, strike)) + 0.55 * Math.max(0, strike)) * strength * armScale,
-        strike * 0.35 * strength,
-        rightRelax * 0.55,
+        rArmPitch * strength * armScale,
+        rArmYaw * strength,
+        rightRelax + rArmRollOffset * strength * armScale,
         true
       );
-      this.applyCharSpacePose('rightLowerArm', -0.52 * strength, 0, 0, true);
+      this.applyCharSpacePose(
+        'rightLowerArm',
+        rElbowPitch * strength,
+        0,
+        rElbowRoll * strength * armScale,
+        true
+      );
 
-      // Left arm braces back for balance
-      this.applyCharSpacePose('leftUpperArm', (0.35 - strike * 0.45) * strength * armScale, 0, leftRelax * 0.85, false);
+      // Left arm braces outward/back for balance
+      this.applyCharSpacePose(
+        'leftUpperArm',
+        lArmPitch * strength * armScale,
+        0,
+        leftRelax + lArmRollOffset * strength,
+        false
+      );
       this.applyCharSpacePose('leftLowerArm', -0.45 * strength, 0, 0, false);
 
       // Athletic split stance
@@ -1871,7 +1933,7 @@ export class ProceduralRigController {
       this.applyCharSpacePose('leftLowerLeg', 0.28 * strength * kneeScale, 0, 0, false);
       this.applyCharSpacePose('rightUpperLeg', 0.22 * strength * slotTuning.strideLength, 0, 0, true);
       this.applyCharSpacePose('rightLowerLeg', 0.24 * strength * kneeScale, 0, 0, true);
-      this.smoothLiveBoneQuaternions(clampedDt, 20);
+      this.smoothLiveBoneQuaternions(clampedDt, 24);
       return;
     }
 

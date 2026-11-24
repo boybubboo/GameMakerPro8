@@ -1538,7 +1538,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           .reverse()
           .find((s) => !s.isProximity);
         if (curBottom) {
-          if (e.code === 'KeyE' || e.code === 'Space' || e.code === 'Enter') {
+          if (
+            e.code === 'KeyE' ||
+            e.code === 'AltLeft' ||
+            e.code === 'AltRight' ||
+            e.code === 'Space' ||
+            e.code === 'Enter'
+          ) {
             e.preventDefault();
             advanceOrDismissSpeech(curBottom.key);
             return;
@@ -1551,7 +1557,10 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         }
       }
 
-      if (e.code === 'Space') {
+      if (
+        e.code === 'Space' ||
+        ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat)
+      ) {
         e.preventDefault();
         if (vultureLookoutActiveRef.current && !e.repeat) {
           inputRef.current.vultureExitQueued = true;
@@ -1576,9 +1585,22 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         e.code === 'ArrowRight'
       ) {
         e.preventDefault();
-      } else if (e.code === 'KeyF' || e.code === 'KeyJ') {
+      } else if (
+        e.code === 'KeyF' ||
+        e.code === 'KeyJ' ||
+        ((e.code === 'ControlLeft' || e.code === 'ControlRight') && !e.repeat)
+      ) {
+        if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+          e.preventDefault();
+        }
         inputRef.current.attackQueued = true;
-      } else if (e.code === 'KeyE') {
+      } else if (
+        e.code === 'KeyE' ||
+        ((e.code === 'AltLeft' || e.code === 'AltRight') && !e.repeat)
+      ) {
+        if (e.code === 'AltLeft' || e.code === 'AltRight') {
+          e.preventDefault();
+        }
         inputRef.current.interactQueued = true;
       } else if (e.code === 'KeyQ' && !e.repeat && !isDrivingMode) {
         if (vultureLookoutActiveRef.current) {
@@ -1656,11 +1678,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       inputRef.current.keys.delete(e.code);
     };
 
+    const onWindowBlur = () => {
+      inputRef.current.keys.clear();
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
     };
   }, [
     envType,
@@ -2236,7 +2264,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       });
       const heroSlashArc = new THREE.Mesh(heroSlashGeo, heroSlashMat);
       heroSlashArc.position.set(0, 0.96, 0.34);
-      heroSlashArc.rotation.z = -0.28;
+      heroSlashArc.rotation.z = 0.22;
       heroSlashArc.visible = false;
       heroRoot.add(heroSlashArc);
 
@@ -2971,8 +2999,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         }
       };
 
-      const ATTACK_DURATION = 0.38;
-      const CHOP_DURATION = 0.46;
+      const ATTACK_DURATION = 0.44;
+      const CHOP_DURATION = 0.48;
       const attackHitEnemies = new Set<string>();
       let activeAttackKind: 'sword' | 'axe' = 'sword';
       let activeAttackDuration = ATTACK_DURATION;
@@ -3882,9 +3910,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const joyMag = Math.hypot(inp.joyX, inp.joyY);
           const isFirstPersonControl = camModeNow === 'firstPerson';
           const effectiveMoveMag = isFirstPersonControl ? Math.abs(moveZ) : mag;
-          const wantsRun =
-            (inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight') || joyMag > 0.85) &&
-            enabledSet.has('run');
+          const wantsRun = joyMag > 0.85 && enabledSet.has('run');
           isRunning = wantsRun && !staminaExhausted && stamina > 0.5 && effectiveMoveMag > 0.08;
           const moveSpeed =
             (isSwimming
@@ -4256,13 +4282,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           const targetTiltX = isSwimming ? (moving ? 0.92 : 0.16) : recoilTilt;
           swimTiltX = THREE.MathUtils.damp(swimTiltX, targetTiltX, isSwimming ? 7.5 : 16, dt);
 
-          // Update stylized hero sword/axe slash arc ribbon during the active swing window
+          // Update stylized hero sword/axe slash arc ribbon during the active inward swing window
           if (attackAnimTimer > 0) {
             const p = 1 - attackAnimTimer / activeAttackDuration;
-            if (p >= 0.16 && p <= 0.68) {
-              const sp = (p - 0.16) / 0.52;
+            if (p >= 0.26 && p <= 0.72) {
+              const sp = (p - 0.26) / 0.46;
               heroSlashArc.visible = true;
-              heroSlashArc.rotation.y = 0.85 - sp * 1.95;
+              heroSlashArc.rotation.y = -2.55 + sp * 2.1;
               heroSlashArc.scale.setScalar(
                 (activeAttackKind === 'axe' ? 1.04 : 0.88) + Math.sin(sp * Math.PI) * 0.24
               );
@@ -4354,24 +4380,40 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             let targetArmLX = 0;
             let targetArmLZ = 0;
             let targetArmRX = 0;
+            let targetArmRY = 0;
             let targetArmRZ = 0;
+            let targetForearmLX = -0.18;
+            let targetForearmRX = -0.18;
+            let targetForearmRZ = 0;
             let targetLegLX = 0;
             let targetLegRX = 0;
 
             if (isSwimming) {
               if (attackAnimTimer > 0) {
                 const p = 1 - attackAnimTimer / activeAttackDuration;
-                targetArmRX = p < 0.25 ? -2.0 : THREE.MathUtils.lerp(-2.0, 0.55, Math.min(1, (p - 0.25) / 0.45));
-                targetArmRZ = p < 0.25 ? 0.5 : -0.7;
-                targetArmLZ = -0.45;
+                if (p < 0.28) {
+                  const t = p / 0.28;
+                  targetArmRX = 0.2 * t;
+                  targetArmRY = -0.68 * t;
+                  targetArmRZ = -1.15 * t;
+                  targetForearmRX = 0.82 * t;
+                  targetArmLZ = 0.45;
+                } else {
+                  const s = Math.min(1, (p - 0.28) / 0.44);
+                  targetArmRX = THREE.MathUtils.lerp(0.2, -0.95, s);
+                  targetArmRY = THREE.MathUtils.lerp(-0.68, 1.05, s);
+                  targetArmRZ = THREE.MathUtils.lerp(-1.15, -0.55, s);
+                  targetForearmRX = THREE.MathUtils.lerp(0.82, -0.42, s);
+                  targetArmLZ = 0.45;
+                }
               } else if (moving) {
                 // Smooth synchronized breaststroke glide — calm, readable, zero rapid vibration
                 const pull = Math.sin(swimPhase);
                 const reach = Math.cos(swimPhase);
                 targetArmLX = -1.62 + reach * 0.52;
                 targetArmRX = -1.62 + reach * 0.52;
-                targetArmLZ = -(0.5 + pull * 0.42);
-                targetArmRZ = 0.5 + pull * 0.42;
+                targetArmLZ = 0.5 + pull * 0.42;
+                targetArmRZ = -(0.5 + pull * 0.42);
                 targetLegLX = 0.22 + pull * 0.22;
                 targetLegRX = 0.22 - pull * 0.22;
                 targetBodyRoll = 0;
@@ -4380,8 +4422,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 const tread = Math.sin(swimPhase);
                 targetArmLX = -0.35;
                 targetArmRX = -0.35;
-                targetArmLZ = -0.52 - tread * 0.22;
-                targetArmRZ = 0.52 + tread * 0.22;
+                targetArmLZ = 0.52 + tread * 0.22;
+                targetArmRZ = -(0.52 + tread * 0.22);
                 targetLegLX = tread * 0.2;
                 targetLegRX = -tread * 0.2;
               }
@@ -4390,6 +4432,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               targetLegLX = stride;
               targetLegRX = -stride;
               targetArmLX = -stride * 0.68;
+              targetForearmLX = -0.18 - Math.max(0, stride) * 0.28;
 
               if (fishingState.phase !== 'idle') {
                 // Expressive fishing pole animation: backswing -> whip cast -> gentle hold -> bite tug -> reel whip!
@@ -4399,107 +4442,146 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                   if (p < 0.36) {
                     const t = p / 0.36;
                     targetArmRX = THREE.MathUtils.lerp(-0.4, -2.28, t);
-                    targetArmRZ = 0.22 * t;
+                    targetArmRZ = -0.22 * t;
+                    targetForearmRX = -0.45 * t;
                     targetBodyYaw = -0.36 * t;
                     targetArmLX = -0.45 * t;
                   } else {
                     const t = (p - 0.36) / 0.64;
                     const ease = 1 - Math.pow(1 - t, 3);
                     targetArmRX = THREE.MathUtils.lerp(-2.28, -0.52, ease);
-                    targetArmRZ = THREE.MathUtils.lerp(0.22, -0.1, ease);
+                    targetArmRZ = THREE.MathUtils.lerp(-0.22, 0.1, ease);
+                    targetForearmRX = THREE.MathUtils.lerp(-0.45, -0.15, ease);
                     targetBodyYaw = THREE.MathUtils.lerp(-0.36, 0.24, ease);
                     targetArmLX = THREE.MathUtils.lerp(-0.45, 0.15, ease);
                   }
                 } else if (fishingState.phase === 'waiting') {
                   targetArmRX = -0.68 + Math.sin(gameElapsed * 2.1) * 0.05;
-                  targetArmRZ = -0.06;
+                  targetArmRZ = 0.06;
+                  targetForearmRX = -0.22;
                   targetArmLX = -0.36;
-                  targetArmLZ = 0.22;
+                  targetArmLZ = -0.22;
                   targetBodyYaw = 0.12;
                 } else if (fishingState.phase === 'bite') {
                   const tug = Math.sin(gameElapsed * 26);
                   targetArmRX = -0.32 + tug * 0.18;
-                  targetArmRZ = -0.1 + tug * 0.08;
+                  targetArmRZ = 0.1 + tug * 0.08;
+                  targetForearmRX = -0.35 + tug * 0.14;
                   targetArmLX = -0.52;
                   targetBodyYaw = 0.18 + tug * 0.06;
                 } else if (fishingState.phase === 'reeling') {
                   const p = Math.min(1, fishingState.timer / 0.78);
                   const whip = Math.sin(Math.min(1, p * 1.4) * Math.PI * 0.5);
                   targetArmRX = THREE.MathUtils.lerp(-0.35, -1.92, whip);
-                  targetArmRZ = 0.32 * whip;
+                  targetArmRZ = -0.32 * whip;
+                  targetForearmRX = -0.48 * whip;
                   targetArmLX = -0.95 * whip;
                   targetBodyYaw = -0.38 * whip;
                   targetHeadX = -0.18 * whip;
                 }
               } else if (attackAnimTimer > 0 && activeAttackKind === 'axe') {
-                // Weighty two-handed woodchopping swing: wind back over right shoulder -> heavy cleave -> follow-through
+                // Forehand woodchopping swing: wind back outward to the right with elbow bent back -> swing inward -> recover
                 const p = 1 - attackAnimTimer / activeAttackDuration;
-                if (p < 0.28) {
-                  const t = p / 0.28;
-                  targetArmRX = -2.35 * t;
-                  targetArmRZ = 0.76 * t;
-                  targetArmLX = -1.78 * t;
-                  targetArmLZ = 0.42 * t;
-                  targetBodyYaw = -0.62 * t;
-                  targetBodyRoll = -0.14 * t;
-                } else if (p < 0.64) {
-                  const t = (p - 0.28) / 0.36;
+                if (p < 0.30) {
+                  const t = Math.sin((p / 0.30) * Math.PI * 0.5);
+                  targetArmRX = 0.30 * t;
+                  targetArmRY = -0.78 * t;
+                  targetArmRZ = -1.28 * t;
+                  targetForearmRX = THREE.MathUtils.lerp(-0.18, 0.98, t);
+                  targetForearmRZ = -0.44 * t;
+                  targetArmLX = -0.48 * t;
+                  targetArmLZ = 0.36 * t;
+                  targetBodyYaw = -0.52 * t;
+                  targetBodyRoll = 0.14 * t;
+                } else if (p < 0.68) {
+                  const t = (p - 0.30) / 0.38;
                   const ease = 1 - Math.pow(1 - t, 3);
-                  targetArmRX = THREE.MathUtils.lerp(-2.35, 0.36, ease);
-                  targetArmRZ = THREE.MathUtils.lerp(0.76, -1.04, ease);
-                  targetArmLX = THREE.MathUtils.lerp(-1.78, 0.18, ease);
-                  targetArmLZ = THREE.MathUtils.lerp(0.42, -0.38, ease);
-                  targetBodyYaw = THREE.MathUtils.lerp(-0.62, 0.64, ease);
-                  targetBodyRoll = THREE.MathUtils.lerp(-0.14, 0.16, ease);
+                  targetArmRX = THREE.MathUtils.lerp(0.30, -0.98, ease);
+                  targetArmRY = THREE.MathUtils.lerp(-0.78, 1.18, ease);
+                  targetArmRZ = THREE.MathUtils.lerp(-1.28, -0.60, ease);
+                  targetForearmRX =
+                    t < 0.45
+                      ? THREE.MathUtils.lerp(0.98, -0.22, t / 0.45)
+                      : THREE.MathUtils.lerp(-0.22, -0.62, (t - 0.45) / 0.55);
+                  targetForearmRZ = THREE.MathUtils.lerp(-0.44, 0.34, ease);
+                  targetArmLX = THREE.MathUtils.lerp(-0.48, 0.32, ease);
+                  targetArmLZ = THREE.MathUtils.lerp(0.36, 0.18, ease);
+                  targetBodyYaw = THREE.MathUtils.lerp(-0.52, 0.58, ease);
+                  targetBodyRoll = THREE.MathUtils.lerp(0.14, -0.14, ease);
                 } else {
-                  const t = (p - 0.64) / 0.36;
-                  targetArmRX = THREE.MathUtils.lerp(0.36, stride * 0.68, t);
-                  targetArmRZ = THREE.MathUtils.lerp(-1.04, 0, t);
-                  targetArmLX = THREE.MathUtils.lerp(0.18, -stride * 0.68, t);
-                  targetArmLZ = THREE.MathUtils.lerp(-0.38, 0, t);
-                  targetBodyYaw = THREE.MathUtils.lerp(0.64, 0, t);
-                  targetBodyRoll = THREE.MathUtils.lerp(0.16, 0, t);
+                  const t = (p - 0.68) / 0.32;
+                  const ease = t * t * (3 - 2 * t);
+                  targetArmRX = THREE.MathUtils.lerp(-0.98, stride * 0.68, ease);
+                  targetArmRY = THREE.MathUtils.lerp(1.18, 0, ease);
+                  targetArmRZ = THREE.MathUtils.lerp(-0.60, 0, ease);
+                  targetForearmRX = THREE.MathUtils.lerp(-0.62, -0.18, ease);
+                  targetForearmRZ = THREE.MathUtils.lerp(0.34, 0, ease);
+                  targetArmLX = THREE.MathUtils.lerp(0.32, -stride * 0.68, ease);
+                  targetArmLZ = THREE.MathUtils.lerp(0.18, 0, ease);
+                  targetBodyYaw = THREE.MathUtils.lerp(0.58, 0, ease);
+                  targetBodyRoll = THREE.MathUtils.lerp(-0.14, 0, ease);
                 }
               } else if (attackAnimTimer > 0) {
-                // Decisive 3-phase sword slash: windup -> sweeping diagonal cleave -> recovery
+                // Forehand sword slash: wind back outward to the right with elbow bent back -> swing inward -> recover
                 const p = 1 - attackAnimTimer / activeAttackDuration;
-                if (p < 0.2) {
-                  const t = p / 0.2;
-                  targetArmRX = -2.1 * t;
-                  targetArmRZ = 0.68 * t;
-                  targetBodyYaw = -0.36 * t;
-                  targetArmLX = -0.35 * t;
-                } else if (p < 0.62) {
-                  const t = (p - 0.2) / 0.42;
+                if (p < 0.28) {
+                  const t = Math.sin((p / 0.28) * Math.PI * 0.5);
+                  targetArmRX = 0.24 * t;
+                  targetArmRY = -0.72 * t;
+                  targetArmRZ = -1.22 * t;
+                  targetForearmRX = THREE.MathUtils.lerp(-0.18, 0.92, t);
+                  targetForearmRZ = -0.38 * t;
+                  targetBodyYaw = -0.44 * t;
+                  targetBodyRoll = 0.10 * t;
+                  targetArmLX = -0.25 * t;
+                  targetArmLZ = 0.24 * t;
+                } else if (p < 0.66) {
+                  const t = (p - 0.28) / 0.38;
                   const ease = 1 - Math.pow(1 - t, 3);
-                  targetArmRX = THREE.MathUtils.lerp(-2.1, 0.58, ease);
-                  targetArmRZ = THREE.MathUtils.lerp(0.68, -0.88, ease);
-                  targetBodyYaw = THREE.MathUtils.lerp(-0.36, 0.5, ease);
-                  targetArmLX = THREE.MathUtils.lerp(-0.35, 0.22, ease);
+                  targetArmRX = THREE.MathUtils.lerp(0.24, -1.04, ease);
+                  targetArmRY = THREE.MathUtils.lerp(-0.72, 1.22, ease);
+                  targetArmRZ = THREE.MathUtils.lerp(-1.22, -0.56, ease);
+                  targetForearmRX =
+                    t < 0.45
+                      ? THREE.MathUtils.lerp(0.92, -0.24, t / 0.45)
+                      : THREE.MathUtils.lerp(-0.24, -0.64, (t - 0.45) / 0.55);
+                  targetForearmRZ = THREE.MathUtils.lerp(-0.38, 0.32, ease);
+                  targetBodyYaw = THREE.MathUtils.lerp(-0.44, 0.54, ease);
+                  targetBodyRoll = THREE.MathUtils.lerp(0.10, -0.10, ease);
+                  targetArmLX = THREE.MathUtils.lerp(-0.25, 0.26, ease);
+                  targetArmLZ = THREE.MathUtils.lerp(0.24, 0.14, ease);
                 } else {
-                  const t = (p - 0.62) / 0.38;
-                  targetArmRX = THREE.MathUtils.lerp(0.58, stride * 0.68, t);
-                  targetArmRZ = THREE.MathUtils.lerp(-0.88, 0, t);
-                  targetBodyYaw = THREE.MathUtils.lerp(0.5, 0, t);
+                  const t = (p - 0.66) / 0.34;
+                  const ease = t * t * (3 - 2 * t);
+                  targetArmRX = THREE.MathUtils.lerp(-1.04, stride * 0.68, ease);
+                  targetArmRY = THREE.MathUtils.lerp(1.22, 0, ease);
+                  targetArmRZ = THREE.MathUtils.lerp(-0.56, 0, ease);
+                  targetForearmRX = THREE.MathUtils.lerp(-0.64, -0.18, ease);
+                  targetForearmRZ = THREE.MathUtils.lerp(0.32, 0, ease);
+                  targetBodyYaw = THREE.MathUtils.lerp(0.54, 0, ease);
+                  targetBodyRoll = THREE.MathUtils.lerp(-0.10, 0, ease);
+                  targetArmLX = THREE.MathUtils.lerp(0.26, -stride * 0.68, ease);
+                  targetArmLZ = THREE.MathUtils.lerp(0.14, 0, ease);
                 }
               } else if (heroRecoilTimer > 0) {
                 targetArmLX = -0.55;
                 targetArmRX = -0.55;
-                targetArmLZ = -0.45;
-                targetArmRZ = 0.45;
+                targetArmLZ = 0.45;
+                targetArmRZ = -0.45;
               } else if (inp.emoteType === 'wave') {
-                targetArmRZ = 2.4 + Math.sin(gameElapsed * 12) * 0.4;
+                targetArmRZ = -2.4 - Math.sin(gameElapsed * 12) * 0.4;
                 targetArmRX = 0;
               } else if (inp.emoteType === 'dance') {
                 heroRig.group.position.y += Math.abs(Math.sin(gameElapsed * 8)) * 0.25;
-                targetArmLZ = -1.2 + Math.sin(gameElapsed * 8) * 0.5;
-                targetArmRZ = 1.2 - Math.sin(gameElapsed * 8) * 0.5;
+                targetArmLZ = 1.2 - Math.sin(gameElapsed * 8) * 0.5;
+                targetArmRZ = -1.2 + Math.sin(gameElapsed * 8) * 0.5;
               } else if (heldTool === 'fishingPole') {
                 targetArmRX = -0.58 + stride * 0.25;
               } else if (heldTool === 'torch') {
                 targetArmRX = -1.05 + stride * 0.18;
               } else {
                 targetArmRX = stride * 0.68;
+                targetForearmRX = -0.18 - Math.max(0, -stride) * 0.28;
               }
             }
 
@@ -4507,11 +4589,19 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             heroRig.bodyPivot.rotation.y = dampJoint(heroRig.bodyPivot.rotation.y, targetBodyYaw, 18);
             heroRig.bodyPivot.rotation.z = dampJoint(heroRig.bodyPivot.rotation.z, targetBodyRoll, 10);
             heroRig.head.rotation.x = dampJoint(heroRig.head.rotation.x, targetHeadX, 10);
-            const armLambda = attackAnimTimer > 0 ? 28 : 13;
+            const armLambda = attackAnimTimer > 0 ? 30 : 13;
             heroRig.armL.rotation.x = dampJoint(heroRig.armL.rotation.x, targetArmLX, armLambda);
             heroRig.armL.rotation.z = dampJoint(heroRig.armL.rotation.z, targetArmLZ, armLambda);
             heroRig.armR.rotation.x = dampJoint(heroRig.armR.rotation.x, targetArmRX, armLambda);
+            heroRig.armR.rotation.y = dampJoint(heroRig.armR.rotation.y, targetArmRY, armLambda);
             heroRig.armR.rotation.z = dampJoint(heroRig.armR.rotation.z, targetArmRZ, armLambda);
+            if (heroRig.forearmL) {
+              heroRig.forearmL.rotation.x = dampJoint(heroRig.forearmL.rotation.x, targetForearmLX, armLambda);
+            }
+            if (heroRig.forearmR) {
+              heroRig.forearmR.rotation.x = dampJoint(heroRig.forearmR.rotation.x, targetForearmRX, armLambda);
+              heroRig.forearmR.rotation.z = dampJoint(heroRig.forearmR.rotation.z, targetForearmRZ, armLambda);
+            }
             heroRig.legL.rotation.x = dampJoint(heroRig.legL.rotation.x, targetLegLX, 13);
             heroRig.legR.rotation.x = dampJoint(heroRig.legR.rotation.x, targetLegRX, 13);
 
@@ -4790,7 +4880,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               }
             }
 
-            if (p >= 0.16 && p <= 0.62) {
+            if (p >= 0.26 && p <= 0.70) {
               const rangeExtra = heldDefNow?.weaponRange ? Math.max(0, heldDefNow.weaponRange - 2.4) : 0;
               for (const rt of runtimeEntities) {
                 if (!rt.alive || rt.kind !== 'baddie' || rt.aiState === 'dying') continue;
@@ -9064,14 +9154,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             {vultureLookoutActive
               ? 'High Sight Aerial Lookout · Press Q or Space to return to trail'
               : resolvedCamMode === 'sideScroll'
-              ? `A/D or Stick move · W/Space jump · F hit · E use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag`
+              ? `A/D or Stick move · W/Space/Shift jump · F/Ctrl hit · E/Alt use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag`
               : isBuddiesMode
-              ? `WASD move · Q use power · X switch power · E gather/talk · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
+              ? `WASD move · Q use power · X switch power · E/Alt gather/talk · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
               : resolvedCamMode === 'firstPerson'
-              ? `W/S move · A/D turn · Space jump · F hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
+              ? `W/S move · A/D turn · Space/Shift jump · F/Ctrl hit · E/Alt use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
               : resolvedCamMode === 'front' || resolvedCamMode === 'heroFront'
-              ? `WASD or Stick move · Space jump · F use tool / hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
-              : `WASD move · Space jump · F use tool / hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`}
+              ? `WASD or Stick move · Space/Shift jump · F/Ctrl hit · E/Alt use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`
+              : `WASD move · Space/Shift jump · F/Ctrl hit · E/Alt use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V view`}
           </div>
         </div>
       )}
@@ -9650,7 +9740,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             <div>
               <h2 className="text-xl font-black">Ouch! Out of health</h2>
               <p className="text-xs text-slate-500 dark:text-[#949BB0] mt-1">
-                Give it another go! Use F to swing your sword or dodge traps.
+                Give it another go! Use Ctrl or F to swing your sword or dodge traps.
               </p>
             </div>
             <div className="space-y-2">

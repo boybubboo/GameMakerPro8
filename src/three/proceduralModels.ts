@@ -29,6 +29,8 @@ export interface HeroRig {
   torso: THREE.Mesh;
   armL: THREE.Group;
   armR: THREE.Group;
+  forearmL?: THREE.Group;
+  forearmR?: THREE.Group;
   legL: THREE.Group;
   legR: THREE.Group;
   sword?: THREE.Group;
@@ -277,11 +279,13 @@ function attachCreatureParts(
 
     // Oversized digging foreclaws on hands
     for (const arm of [armL, armR]) {
+      const targetGroup = (arm.userData.forearm as THREE.Group | undefined) ?? arm;
+      const clawY = arm.userData.forearm ? -0.21 : -0.4;
       for (const cx of [-0.045, 0, 0.045]) {
         const claw = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.14, 5), clawMat);
         claw.rotation.x = Math.PI * 0.65;
-        claw.position.set(cx, -0.4, 0.1);
-        arm.add(claw);
+        claw.position.set(cx, clawY, 0.1);
+        targetGroup.add(claw);
       }
     }
 
@@ -1134,25 +1138,36 @@ export function buildHeroModel(
     bodyRoot.add(pack);
   }
 
-  // Arms
+  // Arms with articulated elbow joints (+X is anatomical Left, -X is anatomical Right when facing +Z)
   const makeArm = (x: number) => {
     const pivot = new THREE.Group();
     pivot.position.set(x, 1.04, 0);
-    const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.24, 6, 10), tunicMat);
-    sleeve.position.y = -0.18;
-    sleeve.castShadow = true;
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 10), heroBody === 'Robot' ? steelMat : skinMat);
-    hand.position.y = -0.36;
-    pivot.add(sleeve, hand);
-    bodyRoot.add(pivot);
-    return pivot;
-  };
-  const armL = makeArm(-0.34);
-  const armR = makeArm(0.34);
+    const upperSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.11, 6, 10), tunicMat);
+    upperSleeve.position.y = -0.095;
+    upperSleeve.castShadow = true;
 
-  // Sword on right arm
+    const forearm = new THREE.Group();
+    forearm.position.set(0, -0.19, 0);
+    const lowerSleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.078, 0.1, 6, 10), tunicMat);
+    lowerSleeve.position.y = -0.09;
+    lowerSleeve.castShadow = true;
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.085, 10, 10),
+      heroBody === 'Robot' ? steelMat : skinMat
+    );
+    hand.position.y = -0.18;
+    forearm.add(lowerSleeve, hand);
+    pivot.add(upperSleeve, forearm);
+    pivot.userData.forearm = forearm;
+    bodyRoot.add(pivot);
+    return { pivot, forearm };
+  };
+  const { pivot: armL, forearm: forearmL } = makeArm(0.34);
+  const { pivot: armR, forearm: forearmR } = makeArm(-0.34);
+
+  // Sword on right forearm
   const sword = new THREE.Group();
-  sword.position.set(0, -0.38, 0.06);
+  sword.position.set(0, -0.19, 0.06);
   const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.16, 8), bootMat);
   hilt.rotation.x = Math.PI / 2;
   const guard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.04, 0.05), goldMat);
@@ -1161,11 +1176,11 @@ export function buildHeroModel(
   blade.position.z = 0.36;
   blade.castShadow = true;
   sword.add(hilt, guard, blade);
-  armR.add(sword);
+  forearmR.add(sword);
 
-  // Woodcutter's Axe on right arm (hidden unless holding an axe)
+  // Woodcutter's Axe on right forearm (hidden unless holding an axe)
   const axe = new THREE.Group();
-  axe.position.set(0, -0.38, 0.08);
+  axe.position.set(0, -0.19, 0.08);
   axe.visible = false;
   const axeWoodMat = new THREE.MeshStandardMaterial({ color: '#8F5A32', roughness: 0.82, flatShading: true });
   const axeSteelMat = new THREE.MeshStandardMaterial({ color: '#BCC7D6', roughness: 0.3, metalness: 0.82, flatShading: true });
@@ -1183,11 +1198,11 @@ export function buildHeroModel(
   axeBevel.position.set(0, -0.21, 0.66);
   axeBevel.rotation.x = Math.PI / 2;
   axe.add(axeHandle, axeCollar, axeHead, axeBevel);
-  armR.add(axe);
+  forearmR.add(axe);
 
-  // Bamboo Fishing Pole on right arm (with exact tip anchor for the 3D fishing line)
+  // Bamboo Fishing Pole on right forearm (with exact tip anchor for the 3D fishing line)
   const fishingPole = new THREE.Group();
-  fishingPole.position.set(0, -0.38, 0.08);
+  fishingPole.position.set(0, -0.19, 0.08);
   fishingPole.visible = false;
   const bambooMat = new THREE.MeshStandardMaterial({ color: '#C99B4E', roughness: 0.68, flatShading: true });
   const rodCorkMat = new THREE.MeshStandardMaterial({ color: '#7D4E2A', roughness: 0.85 });
@@ -1208,11 +1223,11 @@ export function buildHeroModel(
   const fishingRodTip = new THREE.Object3D();
   fishingRodTip.position.set(0, 0.08, 2.0);
   fishingPole.add(rodGrip, rodLower, rodUpper, reel, fishingRodTip);
-  armR.add(fishingPole);
+  forearmR.add(fishingPole);
 
-  // Pine Torch on right arm (casts warm light inside caves!)
+  // Pine Torch on right forearm (casts warm light inside caves!)
   const torch = new THREE.Group();
-  torch.position.set(0, -0.38, 0.08);
+  torch.position.set(0, -0.19, 0.08);
   torch.visible = false;
   const torchStick = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.025, 0.62, 6), axeWoodMat);
   torchStick.rotation.x = Math.PI / 2 - 0.35;
@@ -1225,22 +1240,22 @@ export function buildHeroModel(
   const torchLight = new THREE.PointLight('#FF9E44', 5.2, 14, 1.6);
   torchLight.position.set(0, 0.26, 0.48);
   torch.add(torchStick, torchFlame, torchLight);
-  armR.add(torch);
+  forearmR.add(torch);
 
   // Generic held parcel/orb for misc held items
   const heldGeneric = new THREE.Mesh(
     new THREE.DodecahedronGeometry(0.11, 0),
     new THREE.MeshStandardMaterial({ color: '#F59E0B', roughness: 0.45, flatShading: true })
   );
-  heldGeneric.position.set(0, -0.4, 0.14);
+  heldGeneric.position.set(0, -0.21, 0.14);
   heldGeneric.visible = false;
-  armR.add(heldGeneric);
+  forearmR.add(heldGeneric);
 
-  // Shield on left arm
+  // Shield on left forearm
   const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.22, 0.06, 12), cloakMat);
   shield.rotation.z = Math.PI / 2;
-  shield.position.set(-0.08, -0.24, 0.08);
-  armL.add(shield);
+  shield.position.set(0.08, -0.05, 0.08);
+  forearmL.add(shield);
 
   // Wearable Body Cloak (visible when equipping a wearable body cloak item)
   const wearBodyCloak = new THREE.Mesh(
@@ -1379,6 +1394,8 @@ export function buildHeroModel(
     torso,
     armL,
     armR,
+    forearmL,
+    forearmR,
     legL,
     legR,
     sword,
