@@ -164,6 +164,62 @@ export function isWebGPUFallbackAdapter(renderer: { backend?: unknown }): boolea
   );
 }
 
+let cachedIsIOS: boolean | null = null;
+
+/**
+ * Returns true on iPhone/iPad/iPod (including iPadOS desktop-UA Safari).
+ * Always returns false on desktop browsers so desktop rendering paths remain untouched.
+ */
+export function isIOSDevice(): boolean {
+  if (cachedIsIOS !== null) return cachedIsIOS;
+  if (typeof navigator === 'undefined') {
+    cachedIsIOS = false;
+    return false;
+  }
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    cachedIsIOS = true;
+    return true;
+  }
+  // iPadOS 13+ reports Macintosh UA alongside multi-touch capability
+  if (/Macintosh/i.test(ua) && (navigator.maxTouchPoints ?? 0) > 1) {
+    cachedIsIOS = true;
+    return true;
+  }
+  cachedIsIOS = false;
+  return false;
+}
+
+/**
+ * Explicitly forces WebGL context loss and shrinks the backing canvas on iOS
+ * so iOS Safari/WebKit releases GPU backing memory immediately on view transition.
+ */
+export function forceReleaseRendererContext(
+  renderer: { getContext?: () => unknown; domElement?: HTMLCanvasElement } | null | undefined,
+  preCapturedGl?: unknown
+): void {
+  try {
+    const gl = (preCapturedGl ??
+      (typeof renderer?.getContext === 'function' ? renderer.getContext() : null)) as Partial<
+      WebGL2RenderingContext | WebGLRenderingContext
+    > | null;
+    if (gl && typeof gl.getExtension === 'function') {
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+  } catch {
+    // ignore if context is already lost
+  }
+  try {
+    const canvas = renderer?.domElement;
+    if (canvas) {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+  } catch {
+    // ignore canvas resize errors during teardown
+  }
+}
+
 export interface OptimizeGeometryOptions {
   /** Weld duplicate vertices on unindexed static meshes when safe (reduces VRAM & vertex shader work). */
   weldUnindexed?: boolean;

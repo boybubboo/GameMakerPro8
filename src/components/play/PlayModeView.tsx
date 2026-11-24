@@ -163,7 +163,11 @@ import {
   type IslandSceneHandles,
 } from '../../three/islandScene';
 import { hideBatchEntry, setBatchEntryMatrix } from '../../three/batchedScatterBuilder';
-import { isWebGPUFallbackAdapter } from '../../three/webglUtils';
+import {
+  forceReleaseRendererContext,
+  isIOSDevice,
+  isWebGPUFallbackAdapter,
+} from '../../three/webglUtils';
 import {
   MechanismRuntimeController,
 } from '../../three/mechanismController';
@@ -1771,6 +1775,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     const camMode: CameraMode =
       activeLevel.cameraMode ?? (env === 'sideScroller' ? 'sideScroll' : 'front');
 
+    const isIOS = isIOSDevice();
     const isSoftwareGl = detectSoftwareGl();
     let renderer = createMakerRenderer(isSoftwareGl);
     renderer.setSize(container.clientWidth || 800, container.clientHeight || 600);
@@ -1938,6 +1943,13 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     let islandHandlesRef: IslandSceneHandles | null = null;
 
     const bootAndRun = async () => {
+      if (isIOS) {
+        // Allow iOS Safari/WebKit to reclaim the unmounted editor WebGL/WebGPU buffers before allocating Play Mode GPU memory
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        );
+        if (disposed) return;
+      }
       let initOk = false;
       const initHardwareWebGLFallback = async () => {
         if (disposed) return false;
@@ -1984,7 +1996,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       const backend = renderer.backend as { isWebGPUBackend?: boolean } | undefined;
       const pointLightCount = activeLevel.entities.filter((e) => e.kind === 'light').length;
       if (backend?.isWebGPUBackend === true && !isSoftwareGl) {
-        if (env === 'dungeon' || pointLightCount >= 6) {
+        if (!isIOS && (env === 'dungeon' || pointLightCount >= 6)) {
           renderer.lighting = new ClusteredLighting(128, 64, 16, 16);
         }
         if (activeLevel.entities.some((e) => e.meshletEnabled)) {
@@ -2105,6 +2117,25 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       const islandHandles = buildIslandMesh(activeLevel, activeAssets, isSoftwareGl, {
         deferFoliage: true,
         deferFoliageSignal: islandAbort.signal,
+        ...(isIOS
+          ? {
+              onDeferredBatchReady: async (obj: THREE.Object3D) => {
+                if (disposed) return;
+                try {
+                  if (postPipeline) {
+                    await postPipeline.precompileAsync(activeProject.postProcessing, obj);
+                  } else {
+                    await renderer.compileAsync(obj, camera, scene);
+                  }
+                } catch {
+                  // ignore precompile errors on fallback/mobile adapters
+                }
+                if (!disposed && !isSoftwareGl && sun.castShadow) {
+                  sun.shadow.needsUpdate = true;
+                }
+              },
+            }
+          : {}),
       });
       islandHandlesRef = islandHandles;
       scene.add(islandHandles.group);
@@ -8799,7 +8830,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       }
       }
 
-      if (islandHandles.pendingFoliagePromise) {
+      if (!isIOS && islandHandles.pendingFoliagePromise) {
         await islandHandles.pendingFoliagePromise;
       }
       if (disposed) return;
@@ -8892,10 +8923,15 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       scene.environment = null;
       scene.fog = null;
       scene.clear();
+      const preCapturedGl =
+        isIOS && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
       try {
         renderer.dispose();
       } catch {
         // ignore if device already lost
+      }
+      if (isIOS) {
+        forceReleaseRendererContext(renderer, preCapturedGl);
       }
     };
   }, [

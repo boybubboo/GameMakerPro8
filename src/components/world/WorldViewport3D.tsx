@@ -62,7 +62,11 @@ import {
   type IslandSceneHandles,
   type WorldMapRenderContext,
 } from '../../three/islandScene';
-import { isWebGPUFallbackAdapter } from '../../three/webglUtils';
+import {
+  forceReleaseRendererContext,
+  isIOSDevice,
+  isWebGPUFallbackAdapter,
+} from '../../three/webglUtils';
 import { createDefaultFxEmitterConfig } from '../../data/fxEmitterPresets';
 import {
   buildSingleCanopyTreeGroup,
@@ -1870,7 +1874,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         if (!isSoftwareGl) {
           const initLevel = propsRef.current.level;
           const initPointLights = initLevel.entities.filter((e) => e.kind === 'light').length;
-          if (getEnvironmentType(initLevel) === 'dungeon' || initPointLights >= 6) {
+          if (!isIOSDevice() && (getEnvironmentType(initLevel) === 'dungeon' || initPointLights >= 6)) {
             renderer.lighting = new ClusteredLighting(128, 64, 16, 16);
           }
           if (initLevel.entities.some((e) => e.meshletEnabled)) {
@@ -1970,10 +1974,17 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
       scene.environment = null;
       scene.fog = null;
       scene.clear();
+      const preCapturedGl =
+        isIOSDevice() && typeof renderer.getContext === 'function'
+          ? renderer.getContext()
+          : null;
       try {
         renderer.dispose();
       } catch {
         // ignore if device already lost
+      }
+      if (isIOSDevice()) {
+        forceReleaseRendererContext(renderer, preCapturedGl);
       }
     };
   }, []);

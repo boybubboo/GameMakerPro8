@@ -37,6 +37,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { resolvePostProcessingConfig } from '../data/postProcessingPresets';
 import type { PostProcessingConfig } from '../types/maker';
+import { isIOSDevice } from './webglUtils';
 
 export interface PostProcessingRenderContext {
   config?: PostProcessingConfig;
@@ -429,6 +430,10 @@ export class PostProcessingPipeline {
     const pr = this.renderer.getPixelRatio();
     const scaledW = Math.max(1, Math.floor(this.width * pr));
     const scaledH = Math.max(1, Math.floor(this.height * pr));
+    if (isIOSDevice()) {
+      const rt = (this.scenePass as unknown as { renderTarget?: THREE.RenderTarget }).renderTarget;
+      if (rt) rt.samples = 0;
+    }
     this.scenePass.setSize(scaledW, scaledH);
     this.ssrPass?.setSize(scaledW, scaledH);
     this.lastAppliedScaledW = scaledW;
@@ -478,6 +483,7 @@ export class PostProcessingPipeline {
     const cfg = resolvePostProcessingConfig(config);
     const vignetteOn = (cfg.vignetteEnabled ?? true) && cfg.vignette > 0.001;
     const ssrRequested =
+      !isIOSDevice() &&
       !this.ssrFailed &&
       !PostProcessingPipeline.ssrGloballyUnsupported &&
       Boolean(cfg.ssrEnabled) &&
@@ -554,7 +560,7 @@ export class PostProcessingPipeline {
     if (typeof outputTypeFn === 'function') {
       passNode.renderTarget.texture.type = outputTypeFn.call(this.renderer);
     }
-    passNode.renderTarget.samples = this.renderer.samples;
+    passNode.renderTarget.samples = isIOSDevice() ? 0 : this.renderer.samples;
     this.renderer.getDrawingBufferSize(this._drawingSize);
     const dbW = Math.max(1, Math.floor(this._drawingSize.x));
     const dbH = Math.max(1, Math.floor(this._drawingSize.y));

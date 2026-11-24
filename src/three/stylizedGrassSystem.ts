@@ -51,6 +51,7 @@ import {
 } from './botwStyleUtils';
 import { ensureUpgradedTerrain, getTerrainRadius, IslandTerrain, sampleTerrainHeight } from '../utils/terrain';
 import { sampleWorldMapAtWorld } from '../utils/worldMap';
+import { isIOSDevice } from './webglUtils';
 
 export function createDefaultGrassConfig(): GrassFieldConfig {
   return {
@@ -1381,7 +1382,7 @@ export class StylizedGrassSystem {
     this.worldMapCtx = opts.worldMapCtx;
 
     const resolved = resolveGrassConfig(opts.config);
-    if (opts.isSoftwareGl && resolved.quality !== 'off') {
+    if ((opts.isSoftwareGl || isIOSDevice()) && resolved.quality !== 'off') {
       resolved.quality = 'light';
       resolved.viewDistance = Math.min(resolved.viewDistance, 44);
     }

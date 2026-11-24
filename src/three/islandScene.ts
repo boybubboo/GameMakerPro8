@@ -147,6 +147,7 @@ import {
 import { StylizedGrassSystem } from './stylizedGrassSystem';
 import {
   createHardwareWebGL2Context,
+  isIOSDevice,
   probeHardwareWebGL2,
 } from './webglUtils';
 import {
@@ -253,26 +254,29 @@ export function computeEffectivePixelRatio(
   resolutionScale = 1
 ): number {
   if (isSoftwareGl) return 1;
-  const rawDpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  let targetPr = rawDpr * resolutionScale;
-  // Cap total rasterized pixel count around ~2.3M pixels (1440p equivalent) when scale <= 1
-  if (resolutionScale <= 1) {
-    const maxPixels = 2_300_000;
+  const isIOS = isIOSDevice();
+  const rawDpr = isIOS ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
+  let targetPr = rawDpr * (isIOS ? Math.min(resolutionScale, 1) : resolutionScale);
+  // Cap total rasterized pixel count around ~2.3M pixels on desktop (900k on iOS) when scale <= 1
+  if (resolutionScale <= 1 || isIOS) {
+    const maxPixels = isIOS ? 900_000 : 2_300_000;
     const area = Math.max(1, width * height);
     const maxBudgetPr = Math.sqrt(maxPixels / area);
-    targetPr = Math.min(targetPr, Math.max(0.75, maxBudgetPr));
+    targetPr = Math.min(targetPr, Math.max(isIOS ? 0.65 : 0.75, maxBudgetPr));
   }
-  return THREE.MathUtils.clamp(targetPr, 0.5, 2.25);
+  return THREE.MathUtils.clamp(targetPr, 0.5, isIOS ? 1 : 2.25);
 }
 
 export function createMakerRenderer(isSoftwareGl: boolean, forceWebGL = false): WebGPURenderer {
+  const isIOS = isIOSDevice();
+  const useAntialias = !isSoftwareGl && !isIOS;
   let canvas: HTMLCanvasElement | undefined;
   let glContext: WebGL2RenderingContext | undefined;
 
   if (forceWebGL && typeof document !== 'undefined') {
     canvas = document.createElement('canvas');
     const { gl } = createHardwareWebGL2Context(canvas, {
-      antialias: !isSoftwareGl,
+      antialias: useAntialias,
       alpha: true,
       depth: true,
       stencil: false,
@@ -286,14 +290,16 @@ export function createMakerRenderer(isSoftwareGl: boolean, forceWebGL = false): 
   const renderer = new WebGPURenderer({
     canvas,
     context: glContext,
-    antialias: !isSoftwareGl,
+    antialias: useAntialias,
     powerPreference: 'high-performance',
     forceWebGL,
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.08;
-  renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(
+    isSoftwareGl || isIOS ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)
+  );
   renderer.shadowMap.enabled = !isSoftwareGl;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   return renderer;
@@ -338,8 +344,9 @@ export function applyLiveRendererQuality(
   renderer.shadowMap.enabled = shadowsActive;
   if (shadowLight) {
     shadowLight.castShadow = shadowsActive;
-    const targetRes =
+    const baseRes =
       shadowQuality === 'high' ? 2048 : shadowQuality === 'low' ? 512 : 1024;
+    const targetRes = isIOSDevice() ? Math.min(baseRes, 512) : baseRes;
     if (
       shadowLight.shadow.mapSize.x !== targetRes ||
       shadowLight.shadow.mapSize.y !== targetRes
